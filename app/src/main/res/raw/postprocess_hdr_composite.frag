@@ -1,9 +1,3 @@
-/*
- * Client HDR composite inspired by RetroArch's Vulkan/Metal HDR pipeline.
- * The implementation reuses the same conceptual stages:
- * SDR linearization, gamut transform, inverse tonemap, HDR10/scRGB output,
- * and SDR readback tonemap. No RetroArch shader source is vendored here.
- */
 #extension GL_OES_EGL_image_external : require
 precision mediump float;
 precision mediump samplerExternalOES;
@@ -16,11 +10,19 @@ uniform float uPeakNits;
 uniform float uInverseTonemapStrength;
 uniform int uExpandGamut;
 uniform float uBfiActive;
+uniform int uOutputMode;
 
 vec3 srgbToLinear(vec3 c) {
     bvec3 cutoff = lessThanEqual(c, vec3(0.04045));
     vec3 lo = c / 12.92;
     vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));
+    return mix(hi, lo, vec3(cutoff));
+}
+
+vec3 linearToSrgb(vec3 c) {
+    bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));
+    vec3 lo = c * 12.92;
+    vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
     return mix(hi, lo, vec3(cutoff));
 }
 
@@ -80,10 +82,10 @@ void main() {
 
     vec3 gamutAdjusted = applyGamut(linear709, uExpandGamut);
 
-    vec3 hdrLinear = inverseTonemap(gamutAdjusted, uPeakNits, uPaperWhiteNits, uInverseTonemapStrength);
-
-    vec3 outLinear709 = hdrLinear;
-    outLinear709 *= uPaperWhiteNits / 80.0;
-
-    gl_FragColor = vec4(outLinear709, 1.0);
+    if (uOutputMode == 1) {
+        vec3 hdrLinear = inverseTonemap(gamutAdjusted, uPeakNits, uPaperWhiteNits, uInverseTonemapStrength);
+        gl_FragColor = vec4(hdrLinear * (uPaperWhiteNits / 80.0), 1.0);
+    } else {
+        gl_FragColor = vec4(clamp(linearToSrgb(gamutAdjusted), 0.0, 1.0), 1.0);
+    }
 }

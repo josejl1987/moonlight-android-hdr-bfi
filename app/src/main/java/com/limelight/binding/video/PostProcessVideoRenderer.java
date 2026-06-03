@@ -5,7 +5,9 @@ import android.graphics.SurfaceTexture;
 import android.opengl.GLES20;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.view.Display;
 import android.view.Surface;
+import android.view.Window;
 
 import com.limelight.LimeLog;
 import com.limelight.preferences.PreferenceConfiguration;
@@ -23,6 +25,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private final float streamFps;
     private final float displayRefreshRate;
     private final boolean hostHdrStreamActive;
+    private final Window window;
+    private final Display display;
 
     private SurfaceTexture surfaceTexture;
     private Surface codecSurface;
@@ -51,6 +55,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int uInverseTonemapStrengthLoc;
     private int uExpandGamutLoc;
     private int uBfiActiveLoc;
+    private int uOutputModeLoc;
+
+    private int outputModeUniform;
 
     private static final float[] QUAD_VERTICES = {
             -1.0f, -1.0f,
@@ -66,13 +73,18 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             1.0f, 0.0f
     };
 
+    private static final int OUTPUT_MODE_SDR = 0;
+    private static final int OUTPUT_MODE_SCRGB = 1;
+
     public PostProcessVideoRenderer(
             Context context,
             Surface outputSurface,
             PreferenceConfiguration prefs,
             float streamFps,
             float displayRefreshRate,
-            boolean hostHdrStreamActive
+            boolean hostHdrStreamActive,
+            Window window,
+            Display display
     ) {
         this.context = context;
         this.outputSurface = outputSurface;
@@ -80,6 +92,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         this.streamFps = streamFps;
         this.displayRefreshRate = displayRefreshRate;
         this.hostHdrStreamActive = hostHdrStreamActive;
+        this.window = window;
+        this.display = display;
 
         this.bfiScheduler = new BfiScheduler();
         this.hdrSettings = HdrCompositeSettings.fromPrefs(
@@ -187,12 +201,22 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     private void initGl() {
-        eglContext = new EglPostProcessContext(outputSurface);
+        PostProcessCapabilities caps = PostProcessCapabilities.probe(context, window, display);
+        String targetMode = determineTargetMode(caps);
+        outputModeUniform = targetMode.equals("scRGB") ? OUTPUT_MODE_SCRGB : OUTPUT_MODE_SDR;
+
+        eglContext = new EglPostProcessContext(outputSurface, targetMode);
         if (!eglContext.initialize()) {
             LimeLog.warning("PostProcess: EGL init failed, falling back");
             running = false;
             return;
         }
+
+        String actualMode = eglContext.getActualMode();
+        outputModeUniform = actualMode.equals("scRGB") ? OUTPUT_MODE_SCRGB : OUTPUT_MODE_SDR;
+
+        LimeLog.info("PostProcess: target=" + targetMode + " actual=" + actualMode
+                + " outputUniform=" + outputModeUniform);
 
         int[] textures = new int[1];
         GLES20.glGenTextures(1, textures, 0);
@@ -221,6 +245,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         uInverseTonemapStrengthLoc = GLES20.glGetUniformLocation(program, "uInverseTonemapStrength");
         uExpandGamutLoc = GLES20.glGetUniformLocation(program, "uExpandGamut");
         uBfiActiveLoc = GLES20.glGetUniformLocation(program, "uBfiActive");
+        uOutputModeLoc = GLES20.glGetUniformLocation(program, "uOutputMode");
 
         quadVertexBuffer = ByteBuffer.allocateDirect(QUAD_VERTICES.length * 4)
                 .order(ByteOrder.nativeOrder())
@@ -272,6 +297,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             GLES20.glUniform1i(uExpandGamutLoc, hdrSettings.hdrMode != HdrCompositeSettings.HDR_MODE_OFF
                     ? hdrSettings.expandGamut : 0);
             GLES20.glUniform1f(uBfiActiveLoc, bfiScheduler.isEnabled() ? 1.0f : 0.0f);
+            GLES20.glUniform1i(uOutputModeLoc, outputModeUniform);
 
             int positionHandle = GLES20.glGetAttribLocation(program, "aPosition");
             int texCoordHandle = GLES20.glGetAttribLocation(program, "aTexCoord");
@@ -323,6 +349,32 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         LimeLog.info("PostProcess: GL released");
     }
 
+    private String determineTargetMode(PostProcessCapabilities caps) {
+        if (!caps.supportsPostProcess) {
+            return "SDR";
+        }
+
+        int userMode = prefConfig.clientHdrMode;
+        String capsMode = caps.selectedOutputMode;
+
+        switch (userMode) {
+            case HdrCompositeSettings.HDR_MODE_SCRGB:
+                if (caps.supportsScRgb) return "scRGB";
+                if (caps.supportsRgb10a2) return "HDR10";
+                if (caps.supportsWideColor) return "Display P3";
+                return "SDR";
+            case HdrCompositeSettings.HDR_MODE_HDR10:
+                if (caps.supportsRgb10a2) return "HDR10";
+                if (caps.supportsScRgb) return "scRGB";
+                if (caps.supportsWideColor) return "Display P3";
+                return "SDR";
+            case HdrCompositeSettings.HDR_MODE_AUTO:
+                return capsMode;
+            default:
+                return "SDR";
+        }
+    }
+
     private int createProgram() {
         String vertexSource =
                 "attribute vec4 aPosition;\n" +
@@ -344,10 +396,17 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 "uniform float uInverseTonemapStrength;\n" +
                 "uniform int uExpandGamut;\n" +
                 "uniform float uBfiActive;\n" +
+                "uniform int uOutputMode;\n" +
                 "vec3 srgbToLinear(vec3 c) {\n" +
                 "    bvec3 cutoff = lessThanEqual(c, vec3(0.04045));\n" +
                 "    vec3 lo = c / 12.92;\n" +
                 "    vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));\n" +
+                "    return mix(hi, lo, vec3(cutoff));\n" +
+                "}\n" +
+                "vec3 linearToSrgb(vec3 c) {\n" +
+                "    bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));\n" +
+                "    vec3 lo = c * 12.92;\n" +
+                "    vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;\n" +
                 "    return mix(hi, lo, vec3(cutoff));\n" +
                 "}\n" +
                 "vec3 gamut709To2020(vec3 c) {\n" +
@@ -391,10 +450,12 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 "    vec4 sampled = texture2D(uTexture, vTexCoord);\n" +
                 "    vec3 linear709 = srgbToLinear(sampled.rgb);\n" +
                 "    vec3 gamutAdjusted = applyGamut(linear709, uExpandGamut);\n" +
-                "    vec3 hdrLinear = inverseTonemap(gamutAdjusted, uPeakNits, uPaperWhiteNits, uInverseTonemapStrength);\n" +
-                "    vec3 outLinear709 = hdrLinear;\n" +
-                "    outLinear709 *= uPaperWhiteNits / 80.0;\n" +
-                "    gl_FragColor = vec4(outLinear709, 1.0);\n" +
+                "    if (uOutputMode == 1) {\n" +
+                "        vec3 hdrLinear = inverseTonemap(gamutAdjusted, uPeakNits, uPaperWhiteNits, uInverseTonemapStrength);\n" +
+                "        gl_FragColor = vec4(hdrLinear * (uPaperWhiteNits / 80.0), 1.0);\n" +
+                "    } else {\n" +
+                "        gl_FragColor = vec4(clamp(linearToSrgb(gamutAdjusted), 0.0, 1.0), 1.0);\n" +
+                "    }\n" +
                 "}\n";
 
         int vertexShader = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER);

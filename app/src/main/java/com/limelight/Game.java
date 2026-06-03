@@ -885,7 +885,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                                 prefConfig,
                                 prefConfig.fps,
                                 displayRefreshRate,
-                                willStreamHdr
+                                willStreamHdr,
+                                getWindow(),
+                                currentDisplay
                         );
                         postProcessRenderer.start();
                         decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
