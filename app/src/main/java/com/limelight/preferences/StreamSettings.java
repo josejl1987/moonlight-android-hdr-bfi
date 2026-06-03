@@ -20,6 +20,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.DialogFragment;
+import androidx.fragment.app.FragmentManager;
 import androidx.preference.CheckBoxPreference;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
@@ -143,7 +144,7 @@ public class StreamSettings extends AppCompatActivity {
 
                 // Preference dialogs are DialogFragments. Replacing the whole settings fragment
                 // while one is open dismisses it and feels like the settings screen closed.
-                if (isShowingDialogFragment()) {
+                if (isShowingDialogFragment(getSupportFragmentManager())) {
                     LimeLog.info("Skipping settings reload while a preference dialog is showing");
                     return;
                 }
@@ -153,12 +154,21 @@ public class StreamSettings extends AppCompatActivity {
         }
     }
 
-    private boolean isShowingDialogFragment() {
-        for (Fragment fragment : getSupportFragmentManager().getFragments()) {
+    private boolean isShowingDialogFragment(FragmentManager fragmentManager) {
+        for (Fragment fragment : fragmentManager.getFragments()) {
+            if (fragment == null || !fragment.isAdded()) {
+                continue;
+            }
+
             if (fragment instanceof DialogFragment && fragment.isVisible()) {
                 return true;
             }
+
+            if (isShowingDialogFragment(fragment.getChildFragmentManager())) {
+                return true;
+            }
         }
+
         return false;
     }
 
