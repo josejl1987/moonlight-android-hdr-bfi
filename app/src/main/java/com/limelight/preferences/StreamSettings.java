@@ -18,6 +18,7 @@ import android.os.Vibrator;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
+import androidx.fragment.app.Fragment;
 import androidx.fragment.app.DialogFragment;
 import androidx.preference.CheckBoxPreference;
 import androidx.preference.EditTextPreference;
@@ -75,6 +76,7 @@ public class StreamSettings extends AppCompatActivity {
     static DisplayCutout displayCutoutP;
 
     void reloadSettings() {
+        Log.i("StreamSettings", "reloadSettings() activity-level");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Display.Mode mode = getActiveDisplay(StreamSettings.this, previousPrefs).getMode();
             previousDisplayPixelCount = mode.getPhysicalWidth() * mode.getPhysicalHeight();
@@ -92,6 +94,7 @@ public class StreamSettings extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
 //        setTheme(R.style.AppTheme);
         super.onCreate(savedInstanceState);
+        Log.i("StreamSettings", "onCreate()");
 
         previousPrefs = PreferenceConfiguration.readPreferences(this);
 
@@ -105,6 +108,7 @@ public class StreamSettings extends AppCompatActivity {
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
+        Log.i("StreamSettings", "onAttachedToWindow()");
 
         // We have to use this hack on Android 9 because we don't have Display.getCutout()
         // which was added in Android 10.
@@ -123,24 +127,45 @@ public class StreamSettings extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        Log.i("StreamSettings", "onConfigurationChanged()");
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Display.Mode mode = getActiveDisplay(StreamSettings.this, previousPrefs).getMode();
+            int newDisplayPixelCount = mode.getPhysicalWidth() * mode.getPhysicalHeight();
 
             // If the display's physical pixel count has changed, we consider that it's a new display
             // and we should reload our settings (which include display-dependent values).
             //
             // NB: We aren't using displayId here because that stays the same (DEFAULT_DISPLAY) when
             // switching between screens on a foldable device.
-            if (mode.getPhysicalWidth() * mode.getPhysicalHeight() != previousDisplayPixelCount) {
+            if (newDisplayPixelCount != previousDisplayPixelCount) {
+                previousDisplayPixelCount = newDisplayPixelCount;
+
+                // Preference dialogs are DialogFragments. Replacing the whole settings fragment
+                // while one is open dismisses it and feels like the settings screen closed.
+                if (isShowingDialogFragment()) {
+                    LimeLog.info("Skipping settings reload while a preference dialog is showing");
+                    return;
+                }
+
                 reloadSettings();
             }
         }
     }
 
+    private boolean isShowingDialogFragment() {
+        for (Fragment fragment : getSupportFragmentManager().getFragments()) {
+            if (fragment instanceof DialogFragment && fragment.isVisible()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Override
     // NOTE: This will NOT be called on Android 13+ with android:enableOnBackInvokedCallback="true"
     public void onBackPressed() {
+        Log.i("StreamSettings", "onBackPressed()");
         finish();
 
         // Language changes are handled via configuration changes in Android 13+,
@@ -159,6 +184,24 @@ public class StreamSettings extends AppCompatActivity {
                 }
             }
         }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        Log.i("StreamSettings", "onPause()");
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        Log.i("StreamSettings", "onStop()");
+    }
+
+    @Override
+    protected void onDestroy() {
+        Log.i("StreamSettings", "onDestroy()");
+        super.onDestroy();
     }
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
@@ -956,6 +999,68 @@ public class StreamSettings extends AppCompatActivity {
                     }
                 });
             }
+
+            // Fix post-process renderer dependency chain. ListPreference's built-in
+            // dependency attribute only triggers on null/empty values, but our
+            // default is "0" (OFF), so children are always enabled regardless of
+            // whether the renderer is actually active. Manually wire it up.
+            ListPreference ppPref  = (ListPreference) findPreference("list_postprocess_renderer");
+            ListPreference hdrPref = (ListPreference) findPreference("list_client_hdr_mode");
+            CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference("checkbox_client_bfi");
+
+            ListPreference ppWhitePref = (ListPreference) findPreference("list_client_hdr_paper_white_nits");
+            ListPreference ppPeakPref  = (ListPreference) findPreference("list_client_hdr_peak_nits");
+            ListPreference ppGamutPref = (ListPreference) findPreference("list_client_hdr_expand_gamut");
+            ListPreference bfiCompPref = (ListPreference) findPreference("list_client_bfi_compensation");
+
+            if (ppPref != null && hdrPref != null && bfiPref != null) {
+
+                ppPref.setOnPreferenceChangeListener((pref, newVal) -> {
+                    Log.i("StreamSettings", "post-process renderer changed to " + newVal);
+                    boolean on = !"0".equals(newVal);
+                    hdrPref.setEnabled(on);
+                    bfiPref.setEnabled(on);
+                    if (!on) {
+                        hdrPref.setValue("0");
+                        bfiPref.setChecked(false);
+                    }
+                    boolean hdrOn = on && hdrPref.getValue() != null && !"0".equals(hdrPref.getValue());
+                    if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
+                    if (ppPeakPref  != null) ppPeakPref.setEnabled(hdrOn);
+                    if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
+                    if (bfiCompPref != null) bfiCompPref.setEnabled(on && bfiPref.isChecked());
+                    return true;
+                });
+
+                hdrPref.setOnPreferenceChangeListener((pref, newVal) -> {
+                    Log.i("StreamSettings", "hdr mode changed to " + newVal);
+                    boolean on = !"0".equals(newVal);
+                    if (ppWhitePref != null) ppWhitePref.setEnabled(on);
+                    if (ppPeakPref  != null) ppPeakPref.setEnabled(on);
+                    if (ppGamutPref != null) ppGamutPref.setEnabled(on);
+                    return true;
+                });
+
+                bfiPref.setOnPreferenceChangeListener((pref, newVal) -> {
+                    Log.i("StreamSettings", "bfi changed to " + newVal);
+                    boolean checked = (Boolean) newVal;
+                    if (bfiCompPref != null) bfiCompPref.setEnabled(checked);
+                    return true;
+                });
+
+                // Apply initial state
+                String curPp = ppPref.getValue();
+                boolean ppOn = curPp != null && !"0".equals(curPp);
+                hdrPref.setEnabled(ppOn);
+                bfiPref.setEnabled(ppOn);
+
+                String curHdr = hdrPref.getValue();
+                boolean hdrOn = ppOn && curHdr != null && !"0".equals(curHdr);
+                if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
+                if (ppPeakPref  != null) ppPeakPref.setEnabled(hdrOn);
+                if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
+                if (bfiCompPref != null) bfiCompPref.setEnabled(ppOn && bfiPref.isChecked());
+            }
         }
 
         private void removeEntryFromListAndSetValue(String resolutionPrefString, String entryToRemove, String nextDefault) {
@@ -979,6 +1084,7 @@ public class StreamSettings extends AppCompatActivity {
         protected void reloadSettings() {
             // HACK: We need to let the preference change succeed before reinitializing to ensure
             // it's reflected in the new layout.
+            Log.i("StreamSettings", "scheduling fragment reload in 500ms");
             final Handler h = new Handler();
             h.postDelayed(new Runnable() {
                 @Override
@@ -986,6 +1092,7 @@ public class StreamSettings extends AppCompatActivity {
                     // Ensure the activity is still open when this timeout expires
                     StreamSettings settingsActivity = (StreamSettings) SettingsFragment.this.getActivity();
                     if (settingsActivity != null) {
+                        Log.i("StreamSettings", "executing scheduled fragment reload");
                         settingsActivity.reloadSettings();
                     }
                 }

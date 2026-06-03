@@ -22,9 +22,9 @@ public final class EglPostProcessContext {
 
     private static final int EGL_OPENGL_ES3_BIT = 0x0040;
 
-    private EGLDisplay eglDisplay;
-    private EGLContext eglContext;
-    private EGLSurface eglSurface;
+    private EGLDisplay eglDisplay = EGL14.EGL_NO_DISPLAY;
+    private EGLContext eglContext = EGL14.EGL_NO_CONTEXT;
+    private EGLSurface eglSurface = EGL14.EGL_NO_SURFACE;
     private final Surface outputSurface;
     private final String requestMode;
     private String actualMode;
@@ -101,6 +101,12 @@ public final class EglPostProcessContext {
 
     public void release() {
         if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
+            EGL14.eglMakeCurrent(
+                eglDisplay,
+                EGL14.EGL_NO_SURFACE,
+                EGL14.EGL_NO_SURFACE,
+                EGL14.EGL_NO_CONTEXT
+            );
             destroySurface();
             destroyContext();
             EGL14.eglTerminate(eglDisplay);
@@ -160,16 +166,6 @@ public final class EglPostProcessContext {
                 };
                 renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
                 break;
-            case "HDR10":
-                if (!extColorspaceBt2020Pq) return null;
-                baseAttribs = new int[] {
-                        EGL14.EGL_RED_SIZE, 10,
-                        EGL14.EGL_GREEN_SIZE, 10,
-                        EGL14.EGL_BLUE_SIZE, 10,
-                        EGL14.EGL_ALPHA_SIZE, 2
-                };
-                renderableType = EGL14.EGL_OPENGL_ES2_BIT;
-                break;
             case "Display P3":
                 if (!extColorspaceDisplayP3) return null;
                 baseAttribs = new int[] {
@@ -197,7 +193,8 @@ public final class EglPostProcessContext {
                 baseAttribs[2], baseAttribs[3],
                 baseAttribs[4], baseAttribs[5],
                 baseAttribs[6], baseAttribs[7],
-                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT | EGL_RECORDABLE_ANDROID,
+                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT,
+                EGL_RECORDABLE_ANDROID, 1,
                 EGL14.EGL_NONE
         };
 
@@ -229,9 +226,6 @@ public final class EglPostProcessContext {
         switch (mode) {
             case "scRGB":
                 colorspaceValue = EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT;
-                break;
-            case "HDR10":
-                colorspaceValue = EGL_GL_COLORSPACE_BT2020_PQ_EXT;
                 break;
             case "Display P3":
                 colorspaceValue = EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT;
@@ -279,8 +273,6 @@ public final class EglPostProcessContext {
     private static String nextFallback(String mode) {
         switch (mode) {
             case "scRGB":
-                return "HDR10";
-            case "HDR10":
                 return "Display P3";
             case "Display P3":
                 return "SDR";

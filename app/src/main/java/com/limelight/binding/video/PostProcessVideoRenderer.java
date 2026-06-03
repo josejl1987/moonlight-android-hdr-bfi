@@ -5,6 +5,7 @@ import android.graphics.SurfaceTexture;
 import android.opengl.GLES20;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.view.Choreographer;
 import android.view.Display;
 import android.view.Surface;
 import android.view.Window;
@@ -12,14 +13,19 @@ import android.view.Window;
 import com.limelight.LimeLog;
 import com.limelight.preferences.PreferenceConfiguration;
 
+import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
+import java.util.Scanner;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAvailableListener {
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
     private static final int STATS_INTERVAL_FRAMES = 120;
     private static final long FRAME_STALL_TIMEOUT_NS = 3_000_000_000L;
+    private static final long INIT_TIMEOUT_MS = 2000;
 
     private final Context context;
     private final Surface outputSurface;
@@ -45,20 +51,19 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private volatile boolean running;
     private volatile boolean frameAvailable;
     private volatile boolean surfaceTextureReady;
+    private boolean hasValidTextureFrame;
 
     private BfiScheduler bfiScheduler;
     private HdrCompositeSettings hdrSettings;
+    private Choreographer choreographer;
+    private final Choreographer.FrameCallback renderFrameCallback = this::onVsyncFrame;
 
-    private long framePeriodNs;
-    private long lastTickNs;
-    private final Runnable renderTick = this::onRenderTick;
+    private CountDownLatch initLatch;
 
     private int uTextureLoc;
     private int uPaperWhiteNitsLoc;
     private int uPeakNitsLoc;
     private int uInverseTonemapStrengthLoc;
-    private int uExpandGamutLoc;
-    private int uBfiActiveLoc;
     private int uOutputModeLoc;
 
     private int outputModeUniform;
@@ -117,12 +122,35 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 prefs.clientBfiCompensationMode
         );
 
-        this.framePeriodNs = (long)(1_000_000_000.0 / displayRefreshRate);
         this.recoveryFailed = false;
     }
 
     public Surface getCodecSurface() {
         return codecSurface;
+    }
+
+    public boolean startBlocking() {
+        if (running) return true;
+
+        initLatch = new CountDownLatch(1);
+        start();
+
+        try {
+            if (!initLatch.await(INIT_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                LimeLog.warning("PostProcess: init timed out after " + INIT_TIMEOUT_MS + "ms");
+                return false;
+            }
+            if (recoveryFailed || codecSurface == null || !surfaceTextureReady) {
+                LimeLog.warning("PostProcess: init failed (codecSurface=" + codecSurface
+                        + " ready=" + surfaceTextureReady + " failed=" + recoveryFailed + ")");
+                return false;
+            }
+            return true;
+        } catch (InterruptedException e) {
+            LimeLog.warning("PostProcess: init interrupted");
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     public void start() {
@@ -165,9 +193,14 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     public void stop() {
         running = false;
-        if (renderHandler != null) {
-            renderHandler.removeCallbacks(renderTick);
-            renderHandler.post(this::releaseGl);
+        Handler handler = renderHandler;
+        if (handler != null) {
+            handler.post(() -> {
+                if (choreographer != null) {
+                    choreographer.removeFrameCallback(renderFrameCallback);
+                }
+                releaseGl();
+            });
             renderHandler = null;
         }
         if (renderThread != null) {
@@ -219,12 +252,13 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private void initGl() {
         PostProcessCapabilities caps = PostProcessCapabilities.probe(context, window, display);
         String targetMode = determineTargetMode(caps);
-        outputModeUniform = targetMode.equals("scRGB") ? OUTPUT_MODE_SCRGB : OUTPUT_MODE_SDR;
 
         eglContext = new EglPostProcessContext(outputSurface, targetMode);
         if (!eglContext.initialize()) {
             LimeLog.warning("PostProcess: EGL init failed, falling back");
             running = false;
+            recoveryFailed = true;
+            if (initLatch != null) initLatch.countDown();
             return;
         }
 
@@ -248,10 +282,70 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         surfaceTexture.setOnFrameAvailableListener(this);
         codecSurface = new Surface(surfaceTexture);
 
-        program = createProgram();
+        String vertexSource = readRawResource(com.limelight.R.raw.postprocess_video);
+        if (vertexSource == null) {
+            vertexSource =
+                    "attribute vec4 aPosition;\n" +
+                    "attribute vec2 aTexCoord;\n" +
+                    "varying vec2 vTexCoord;\n" +
+                    "void main() {\n" +
+                    "    gl_Position = aPosition;\n" +
+                    "    vTexCoord = aTexCoord;\n" +
+                    "}\n";
+        }
+
+        String fragmentSource = readRawResource(com.limelight.R.raw.postprocess_hdr_composite);
+        if (fragmentSource == null) {
+            // Keep this fallback in sync with res/raw/postprocess_hdr_composite.frag.
+            fragmentSource =
+                    "#extension GL_OES_EGL_image_external : require\n" +
+                    "precision highp float;\n" +
+                    "precision highp samplerExternalOES;\n" +
+                    "varying vec2 vTexCoord;\n" +
+                    "uniform samplerExternalOES uTexture;\n" +
+                    "uniform float uPaperWhiteNits;\n" +
+                    "uniform float uPeakNits;\n" +
+                    "uniform float uInverseTonemapStrength;\n" +
+                    "uniform int uOutputMode;\n" +
+                    "vec3 srgbToLinear(vec3 c) {\n" +
+                    "    bvec3 cutoff = lessThanEqual(c, vec3(0.04045));\n" +
+                    "    vec3 lo = c / 12.92;\n" +
+                    "    vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));\n" +
+                    "    return mix(hi, lo, vec3(cutoff));\n" +
+                    "}\n" +
+                    "vec3 linearToSrgb(vec3 c) {\n" +
+                    "    bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));\n" +
+                    "    vec3 lo = c * 12.92;\n" +
+                    "    vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;\n" +
+                    "    return mix(hi, lo, vec3(cutoff));\n" +
+                    "}\n" +
+                    "vec3 inverseTonemap(vec3 sdrLinear, float peakNits, float paperWhiteNits, float strength) {\n" +
+                    "    float inputVal = max(max(sdrLinear.r, sdrLinear.g), sdrLinear.b);\n" +
+                    "    if (inputVal < 0.0001) return sdrLinear;\n" +
+                    "    float peakRatio = max(peakNits / paperWhiteNits, 1.0);\n" +
+                    "    float denominator = 1.0 - inputVal * (1.0 - (1.0 / peakRatio));\n" +
+                    "    float mapped = inputVal / max(denominator, 0.0001);\n" +
+                    "    vec3 boosted = sdrLinear * (mapped / inputVal);\n" +
+                    "    return mix(sdrLinear, boosted, clamp(strength, 0.0, 1.0));\n" +
+                    "}\n" +
+                    "void main() {\n" +
+                    "    vec4 sampled = texture2D(uTexture, vTexCoord);\n" +
+                    "    vec3 linear709 = srgbToLinear(sampled.rgb);\n" +
+                    "    if (uOutputMode == 0) {\n" +
+                    "        gl_FragColor = vec4(linearToSrgb(linear709), 1.0);\n" +
+                    "        return;\n" +
+                    "    }\n" +
+                    "    vec3 boosted709 = inverseTonemap(linear709, uPeakNits, uPaperWhiteNits, uInverseTonemapStrength);\n" +
+                    "    gl_FragColor = vec4(boosted709 * (uPaperWhiteNits / 80.0), 1.0);\n" +
+                    "}\n";
+        }
+
+        program = createProgram(vertexSource, fragmentSource);
         if (program == 0) {
             LimeLog.warning("PostProcess: shader compile failed");
             running = false;
+            recoveryFailed = true;
+            if (initLatch != null) initLatch.countDown();
             return;
         }
 
@@ -259,8 +353,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         uPaperWhiteNitsLoc = GLES20.glGetUniformLocation(program, "uPaperWhiteNits");
         uPeakNitsLoc = GLES20.glGetUniformLocation(program, "uPeakNits");
         uInverseTonemapStrengthLoc = GLES20.glGetUniformLocation(program, "uInverseTonemapStrength");
-        uExpandGamutLoc = GLES20.glGetUniformLocation(program, "uExpandGamut");
-        uBfiActiveLoc = GLES20.glGetUniformLocation(program, "uBfiActive");
         uOutputModeLoc = GLES20.glGetUniformLocation(program, "uOutputMode");
 
         quadVertexBuffer = ByteBuffer.allocateDirect(QUAD_VERTICES.length * 4)
@@ -274,14 +366,18 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         texCoordBuffer.put(TEX_COORDS).flip();
 
         surfaceTextureReady = true;
-        lastTickNs = System.nanoTime();
+        hasValidTextureFrame = false;
+        choreographer = Choreographer.getInstance();
+
+        if (initLatch != null) initLatch.countDown();
+
         LimeLog.info("PostProcess: GL initialized, starting render loop at " + displayRefreshRate + " Hz");
 
-        renderHandler.post(renderTick);
+        choreographer.postFrameCallback(renderFrameCallback);
     }
 
-    private void onRenderTick() {
-        if (!running || recoveryFailed || !eglContext.isInitialized()) return;
+    private void onVsyncFrame(long frameTimeNanos) {
+        if (!running || recoveryFailed || eglContext == null || !eglContext.isInitialized()) return;
 
         if (!eglContext.makeCurrent()) {
             LimeLog.warning("PostProcess: EGL context lost, stopping renderer");
@@ -290,26 +386,17 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         long nowNs = System.nanoTime();
-        lastTickNs = nowNs;
 
         boolean isBlack = bfiScheduler.nextIsBlack();
-        boolean haveNewFrame = surfaceTextureReady && frameAvailable;
-        boolean frameStalled = haveNewFrame && (nowNs - lastFrameArrivalNs) > FRAME_STALL_TIMEOUT_NS;
+        boolean consumedNewFrame = false;
+        boolean frameStalled = frameAvailable && (nowNs - lastFrameArrivalNs) > FRAME_STALL_TIMEOUT_NS;
 
         if (frameStalled) {
-            LimeLog.warning("PostProcess: frame stall detected, forcing black");
+            LimeLog.warning("PostProcess: frame stall detected");
             frameAvailable = false;
         }
 
-        totalRenderCalls++;
-
-        if (isBlack || frameStalled) {
-            GLES20.glClearColor(0f, 0f, 0f, 1f);
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-        } else if (haveNewFrame) {
-            frameAvailable = false;
-            lastFrameDrawStartNs = nowNs;
-
+        if (frameAvailable && surfaceTextureReady) {
             try {
                 surfaceTexture.updateTexImage();
             } catch (Exception e) {
@@ -317,7 +404,18 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 recoveryFailed = true;
                 return;
             }
+            frameAvailable = false;
+            hasValidTextureFrame = true;
+            lastFrameDrawStartNs = nowNs;
+            consumedNewFrame = true;
+        }
 
+        totalRenderCalls++;
+
+        if (isBlack || frameStalled) {
+            GLES20.glClearColor(0f, 0f, 0f, 1f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        } else if (hasValidTextureFrame) {
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
@@ -336,9 +434,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             GLES20.glUniform1f(uInverseTonemapStrengthLoc,
                     hdrSettings.hdrMode != HdrCompositeSettings.HDR_MODE_OFF
                             ? hdrSettings.inverseTonemapStrength : 0.0f);
-            GLES20.glUniform1i(uExpandGamutLoc, hdrSettings.hdrMode != HdrCompositeSettings.HDR_MODE_OFF
-                    ? hdrSettings.expandGamut : 0);
-            GLES20.glUniform1f(uBfiActiveLoc, bfiScheduler.isEnabled() ? 1.0f : 0.0f);
             GLES20.glUniform1i(uOutputModeLoc, outputModeUniform);
 
             int positionHandle = GLES20.glGetAttribLocation(program, "aPosition");
@@ -354,8 +449,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             GLES20.glDisableVertexAttribArray(positionHandle);
             GLES20.glDisableVertexAttribArray(texCoordHandle);
 
+            if (consumedNewFrame) {
+                accumulatedLatencyNs += (nowNs - lastFrameArrivalNs);
+            }
             framesRendered++;
-            accumulatedLatencyNs += (nowNs - lastFrameArrivalNs);
         } else {
             if (!bfiScheduler.isEnabled()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f);
@@ -375,22 +472,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         if (running && !recoveryFailed) {
-            scheduleNextTick(nowNs);
+            choreographer.postFrameCallback(renderFrameCallback);
         }
-    }
-
-    private void scheduleNextTick(long nowNs) {
-        long expectedNext = lastTickNs + framePeriodNs;
-        long driftNs = nowNs - expectedNext;
-
-        long adjustedDelay = Math.max(0, framePeriodNs - driftNs);
-        long delayMs = adjustedDelay / 1000000L;
-        long remainderNs = adjustedDelay % 1000000L;
-        if (remainderNs > 0) {
-            delayMs++;
-        }
-
-        renderHandler.postDelayed(renderTick, delayMs);
     }
 
     private void resetStats() {
@@ -423,7 +506,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     private void releaseGl() {
         if (eglContext != null) {
-            eglContext.makeCurrent();
+            if (!eglContext.makeCurrent()) {
+                LimeLog.warning("PostProcess: makeCurrent failed during releaseGl");
+            }
             if (program != 0) {
                 GLES20.glDeleteProgram(program);
                 program = 0;
@@ -444,6 +529,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             eglContext = null;
         }
         surfaceTextureReady = false;
+        hasValidTextureFrame = false;
         recoveryFailed = false;
         LimeLog.info("PostProcess: GL released");
     }
@@ -454,109 +540,32 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         int userMode = prefConfig.clientHdrMode;
-        String capsMode = caps.selectedOutputMode;
 
         switch (userMode) {
             case HdrCompositeSettings.HDR_MODE_SCRGB:
-                if (caps.supportsScRgb) return "scRGB";
-                if (caps.supportsRgb10a2) return "HDR10";
-                if (caps.supportsWideColor) return "Display P3";
-                return "SDR";
             case HdrCompositeSettings.HDR_MODE_HDR10:
-                if (caps.supportsRgb10a2) return "HDR10";
                 if (caps.supportsScRgb) return "scRGB";
                 if (caps.supportsWideColor) return "Display P3";
                 return "SDR";
             case HdrCompositeSettings.HDR_MODE_AUTO:
-                return capsMode;
+                return caps.selectedOutputMode;
             default:
                 return "SDR";
         }
     }
 
-    private int createProgram() {
-        String vertexSource =
-                "attribute vec4 aPosition;\n" +
-                "attribute vec2 aTexCoord;\n" +
-                "varying vec2 vTexCoord;\n" +
-                "void main() {\n" +
-                "    gl_Position = aPosition;\n" +
-                "    vTexCoord = aTexCoord;\n" +
-                "}\n";
+    private String readRawResource(int resId) {
+        try (InputStream is = context.getResources().openRawResource(resId);
+             Scanner s = new Scanner(is, "UTF-8").useDelimiter("\\A")) {
+            String result = s.hasNext() ? s.next() : "";
+            return result;
+        } catch (Exception e) {
+            LimeLog.warning("PostProcess: failed to read raw resource " + resId + ": " + e.getMessage());
+            return null;
+        }
+    }
 
-        String fragmentSource =
-                "#extension GL_OES_EGL_image_external : require\n" +
-                "precision mediump float;\n" +
-                "precision mediump samplerExternalOES;\n" +
-                "varying vec2 vTexCoord;\n" +
-                "uniform samplerExternalOES uTexture;\n" +
-                "uniform float uPaperWhiteNits;\n" +
-                "uniform float uPeakNits;\n" +
-                "uniform float uInverseTonemapStrength;\n" +
-                "uniform int uExpandGamut;\n" +
-                "uniform float uBfiActive;\n" +
-                "uniform int uOutputMode;\n" +
-                "vec3 srgbToLinear(vec3 c) {\n" +
-                "    bvec3 cutoff = lessThanEqual(c, vec3(0.04045));\n" +
-                "    vec3 lo = c / 12.92;\n" +
-                "    vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));\n" +
-                "    return mix(hi, lo, vec3(cutoff));\n" +
-                "}\n" +
-                "vec3 linearToSrgb(vec3 c) {\n" +
-                "    bvec3 cutoff = lessThanEqual(c, vec3(0.0031308));\n" +
-                "    vec3 lo = c * 12.92;\n" +
-                "    vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;\n" +
-                "    return mix(hi, lo, vec3(cutoff));\n" +
-                "}\n" +
-                "vec3 gamut709To2020(vec3 c) {\n" +
-                "    mat3 m = mat3(\n" +
-                "         0.627404, 0.069097, 0.016392,\n" +
-                "         0.329282, 0.919540, 0.088013,\n" +
-                "         0.043314, 0.011363, 0.895595);\n" +
-                "    return c * m;\n" +
-                "}\n" +
-                "vec3 gamutExpanded(vec3 c) {\n" +
-                "    float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;\n" +
-                "    vec3 expanded = (c - luma) * 1.3 + luma;\n" +
-                "    return max(expanded, vec3(0.0));\n" +
-                "}\n" +
-                "vec3 gamutWide(vec3 c) {\n" +
-                "    float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;\n" +
-                "    vec3 expanded = (c - luma) * 1.6 + luma;\n" +
-                "    return max(expanded, vec3(0.0));\n" +
-                "}\n" +
-                "vec3 gamutSuper(vec3 c) {\n" +
-                "    float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;\n" +
-                "    vec3 expanded = (c - luma) * 2.2 + luma;\n" +
-                "    return max(expanded, vec3(0.0));\n" +
-                "}\n" +
-                "vec3 applyGamut(vec3 c, int mode) {\n" +
-                "    if (mode == 1) return gamutExpanded(c);\n" +
-                "    if (mode == 2) return gamutWide(c);\n" +
-                "    if (mode == 3) return gamutSuper(c);\n" +
-                "    return gamut709To2020(c);\n" +
-                "}\n" +
-                "vec3 inverseTonemap(vec3 sdrLinear, float peakNits, float paperWhiteNits, float strength) {\n" +
-                "    float inputVal = max(max(sdrLinear.r, sdrLinear.g), sdrLinear.b);\n" +
-                "    if (inputVal < 0.0001) return sdrLinear;\n" +
-                "    float peakRatio = max(peakNits / paperWhiteNits, 1.0);\n" +
-                "    float denominator = 1.0 - inputVal * (1.0 - (1.0 / peakRatio));\n" +
-                "    float mapped = inputVal / max(denominator, 0.0001);\n" +
-                "    vec3 boosted = sdrLinear * (mapped / inputVal);\n" +
-                "    return mix(sdrLinear, boosted, clamp(strength, 0.0, 1.0));\n" +
-                "}\n" +
-                "void main() {\n" +
-                "    vec4 sampled = texture2D(uTexture, vTexCoord);\n" +
-                "    vec3 linear709 = srgbToLinear(sampled.rgb);\n" +
-                "    vec3 gamutAdjusted = applyGamut(linear709, uExpandGamut);\n" +
-                "    if (uOutputMode == 1) {\n" +
-                "        vec3 hdrLinear = inverseTonemap(gamutAdjusted, uPeakNits, uPaperWhiteNits, uInverseTonemapStrength);\n" +
-                "        gl_FragColor = vec4(hdrLinear * (uPaperWhiteNits / 80.0), 1.0);\n" +
-                "    } else {\n" +
-                "        gl_FragColor = vec4(clamp(linearToSrgb(gamutAdjusted), 0.0, 1.0), 1.0);\n" +
-                "    }\n" +
-                "}\n";
-
+    private int createProgram(String vertexSource, String fragmentSource) {
         int vertexShader = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER);
         GLES20.glShaderSource(vertexShader, vertexSource);
         GLES20.glCompileShader(vertexShader);

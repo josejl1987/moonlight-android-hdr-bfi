@@ -866,6 +866,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // The connection will be started when the surface gets created
         //streamContainer.getHolder().addCallback(this);
 
+        final boolean finalWillStreamHdr = willStreamHdr;
+        final Display finalCurrentDisplay = currentDisplay;
         streamContainer.setOnSurfaceAvailable(() -> {
             if (!attemptedConnection) {
                 attemptedConnection = true;
@@ -877,7 +879,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         renderSurface,
                         prefConfig,
                         displayRefreshRate,
-                        willStreamHdr)) {
+                        finalWillStreamHdr)) {
                     try {
                         postProcessRenderer = new PostProcessVideoRenderer(
                                 Game.this,
@@ -885,15 +887,21 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                                 prefConfig,
                                 prefConfig.fps,
                                 displayRefreshRate,
-                                willStreamHdr,
+                                finalWillStreamHdr,
                                 getWindow(),
-                                currentDisplay
+                                finalCurrentDisplay
                         );
-                        postProcessRenderer.start();
-                        decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
-                        LimeLog.info("Post-process renderer enabled");
+                        if (postProcessRenderer.startBlocking()) {
+                            decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
+                            LimeLog.info("Post-process renderer enabled");
+                        } else {
+                            LimeLog.warning("Post-process renderer init failed; falling back to direct surface");
+                            postProcessRenderer.release();
+                            postProcessRenderer = null;
+                            decoderRenderer.setRenderTarget(renderSurface);
+                        }
                     } catch (Throwable t) {
-                        LimeLog.warning("Post-process renderer failed; falling back to direct surface: " + t);
+                        LimeLog.warning("Post-process renderer exception; falling back to direct surface: " + t);
                         if (postProcessRenderer != null) {
                             postProcessRenderer.release();
                             postProcessRenderer = null;
@@ -901,6 +909,20 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         decoderRenderer.setRenderTarget(renderSurface);
                     }
                 } else {
+                    if (prefConfig.clientBfi) {
+                        boolean bfiUseful = Math.abs(displayRefreshRate - prefConfig.fps * 2.0f) <= 3.0f;
+                        if (!bfiUseful) {
+                            Toast.makeText(Game.this,
+                                    "BFI requires ~" + (int)(prefConfig.fps * 2) + " Hz display (current: "
+                                            + (int)displayRefreshRate + " Hz)", Toast.LENGTH_LONG).show();
+                        }
+                    }
+                    if (prefConfig.clientHdrMode != 0 && !finalWillStreamHdr
+                            && prefConfig.postProcessRendererMode == 0) {
+                        Toast.makeText(Game.this,
+                                "Enable Post-process renderer (Auto/Force) to use HDR/ BFI",
+                                Toast.LENGTH_LONG).show();
+                    }
                     decoderRenderer.setRenderTarget(renderSurface);
                 }
 
