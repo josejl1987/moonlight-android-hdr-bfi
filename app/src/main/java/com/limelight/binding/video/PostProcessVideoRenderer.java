@@ -45,6 +45,13 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private long framePeriodNs;
     private final Runnable renderTick = this::onRenderTick;
 
+    private int uTextureLoc;
+    private int uPaperWhiteNitsLoc;
+    private int uPeakNitsLoc;
+    private int uInverseTonemapStrengthLoc;
+    private int uExpandGamutLoc;
+    private int uBfiActiveLoc;
+
     private static final float[] QUAD_VERTICES = {
             -1.0f, -1.0f,
              1.0f, -1.0f,
@@ -113,6 +120,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         LimeLog.info("PostProcess: displayHz=" + displayRefreshRate + " streamFps=" + streamFps);
+        LimeLog.info("PostProcess: HDR boost paperWhite=" + hdrSettings.paperWhiteNits
+                + " peak=" + hdrSettings.effectiveVisiblePeakNits
+                + " gamut=" + hdrSettings.expandGamut
+                + " strength=" + hdrSettings.inverseTonemapStrength);
 
         running = true;
 
@@ -204,6 +215,13 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             return;
         }
 
+        uTextureLoc = GLES20.glGetUniformLocation(program, "uTexture");
+        uPaperWhiteNitsLoc = GLES20.glGetUniformLocation(program, "uPaperWhiteNits");
+        uPeakNitsLoc = GLES20.glGetUniformLocation(program, "uPeakNits");
+        uInverseTonemapStrengthLoc = GLES20.glGetUniformLocation(program, "uInverseTonemapStrength");
+        uExpandGamutLoc = GLES20.glGetUniformLocation(program, "uExpandGamut");
+        uBfiActiveLoc = GLES20.glGetUniformLocation(program, "uBfiActive");
+
         quadVertexBuffer = ByteBuffer.allocateDirect(QUAD_VERTICES.length * 4)
                 .order(ByteOrder.nativeOrder())
                 .asFloatBuffer();
@@ -238,13 +256,25 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
             GLES20.glUseProgram(program);
 
-            int positionHandle = GLES20.glGetAttribLocation(program, "aPosition");
-            int texCoordHandle = GLES20.glGetAttribLocation(program, "aTexCoord");
-            int textureHandle = GLES20.glGetUniformLocation(program, "uTexture");
-
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureId);
-            GLES20.glUniform1i(textureHandle, 0);
+            GLES20.glUniform1i(uTextureLoc, 0);
+
+            float peakForShader = bfiScheduler.isEnabled()
+                    ? hdrSettings.effectiveVisiblePeakNits
+                    : hdrSettings.peakNits;
+
+            GLES20.glUniform1f(uPaperWhiteNitsLoc, hdrSettings.paperWhiteNits);
+            GLES20.glUniform1f(uPeakNitsLoc, peakForShader);
+            GLES20.glUniform1f(uInverseTonemapStrengthLoc,
+                    hdrSettings.hdrMode != HdrCompositeSettings.HDR_MODE_OFF
+                            ? hdrSettings.inverseTonemapStrength : 0.0f);
+            GLES20.glUniform1i(uExpandGamutLoc, hdrSettings.hdrMode != HdrCompositeSettings.HDR_MODE_OFF
+                    ? hdrSettings.expandGamut : 0);
+            GLES20.glUniform1f(uBfiActiveLoc, bfiScheduler.isEnabled() ? 1.0f : 0.0f);
+
+            int positionHandle = GLES20.glGetAttribLocation(program, "aPosition");
+            int texCoordHandle = GLES20.glGetAttribLocation(program, "aTexCoord");
 
             GLES20.glEnableVertexAttribArray(positionHandle);
             GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
@@ -306,10 +336,65 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         String fragmentSource =
                 "#extension GL_OES_EGL_image_external : require\n" +
                 "precision mediump float;\n" +
+                "precision mediump samplerExternalOES;\n" +
                 "varying vec2 vTexCoord;\n" +
                 "uniform samplerExternalOES uTexture;\n" +
+                "uniform float uPaperWhiteNits;\n" +
+                "uniform float uPeakNits;\n" +
+                "uniform float uInverseTonemapStrength;\n" +
+                "uniform int uExpandGamut;\n" +
+                "uniform float uBfiActive;\n" +
+                "vec3 srgbToLinear(vec3 c) {\n" +
+                "    bvec3 cutoff = lessThanEqual(c, vec3(0.04045));\n" +
+                "    vec3 lo = c / 12.92;\n" +
+                "    vec3 hi = pow((c + 0.055) / 1.055, vec3(2.4));\n" +
+                "    return mix(hi, lo, vec3(cutoff));\n" +
+                "}\n" +
+                "vec3 gamut709To2020(vec3 c) {\n" +
+                "    mat3 m = mat3(\n" +
+                "         0.627404, 0.069097, 0.016392,\n" +
+                "         0.329282, 0.919540, 0.088013,\n" +
+                "         0.043314, 0.011363, 0.895595);\n" +
+                "    return c * m;\n" +
+                "}\n" +
+                "vec3 gamutExpanded(vec3 c) {\n" +
+                "    float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;\n" +
+                "    vec3 expanded = (c - luma) * 1.3 + luma;\n" +
+                "    return max(expanded, vec3(0.0));\n" +
+                "}\n" +
+                "vec3 gamutWide(vec3 c) {\n" +
+                "    float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;\n" +
+                "    vec3 expanded = (c - luma) * 1.6 + luma;\n" +
+                "    return max(expanded, vec3(0.0));\n" +
+                "}\n" +
+                "vec3 gamutSuper(vec3 c) {\n" +
+                "    float luma = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;\n" +
+                "    vec3 expanded = (c - luma) * 2.2 + luma;\n" +
+                "    return max(expanded, vec3(0.0));\n" +
+                "}\n" +
+                "vec3 applyGamut(vec3 c, int mode) {\n" +
+                "    if (mode == 1) return gamutExpanded(c);\n" +
+                "    if (mode == 2) return gamutWide(c);\n" +
+                "    if (mode == 3) return gamutSuper(c);\n" +
+                "    return gamut709To2020(c);\n" +
+                "}\n" +
+                "vec3 inverseTonemap(vec3 sdrLinear, float peakNits, float paperWhiteNits, float strength) {\n" +
+                "    float inputVal = max(max(sdrLinear.r, sdrLinear.g), sdrLinear.b);\n" +
+                "    if (inputVal < 0.0001) return sdrLinear;\n" +
+                "    float peakRatio = max(peakNits / paperWhiteNits, 1.0);\n" +
+                "    float denominator = 1.0 - inputVal * (1.0 - (1.0 / peakRatio));\n" +
+                "    float mapped = inputVal / max(denominator, 0.0001);\n" +
+                "    vec3 boosted = sdrLinear * (mapped / inputVal);\n" +
+                "    return mix(sdrLinear, boosted, clamp(strength, 0.0, 1.0));\n" +
+                "}\n" +
                 "void main() {\n" +
-                "    gl_FragColor = texture2D(uTexture, vTexCoord);\n" +
+                "    vec4 sampled = texture2D(uTexture, vTexCoord);\n" +
+                "    vec3 linear709 = srgbToLinear(sampled.rgb);\n" +
+                "    vec3 gamutAdjusted = applyGamut(linear709, uExpandGamut);\n" +
+                "    vec3 hdrLinear = inverseTonemap(gamutAdjusted, uPeakNits, uPaperWhiteNits, uInverseTonemapStrength);\n" +
+                "    vec3 outLinear709 = hdrLinear;\n" +
+                "    outLinear709 *= uPaperWhiteNits / 80.0;\n" +
+                "    gl_FragColor = vec4(outLinear709, 1.0);\n" +
                 "}\n";
 
         int vertexShader = GLES20.glCreateShader(GLES20.GL_VERTEX_SHADER);
