@@ -19,6 +19,7 @@ import java.nio.FloatBuffer;
 public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAvailableListener {
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
     private static final int STATS_INTERVAL_FRAMES = 120;
+    private static final long FRAME_STALL_TIMEOUT_NS = 3_000_000_000L;
 
     private final Context context;
     private final Surface outputSurface;
@@ -32,6 +33,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private SurfaceTexture surfaceTexture;
     private Surface codecSurface;
     private EglPostProcessContext eglContext;
+    private volatile boolean recoveryFailed;
     private HandlerThread renderThread;
     private Handler renderHandler;
 
@@ -116,6 +118,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         );
 
         this.framePeriodNs = (long)(1_000_000_000.0 / displayRefreshRate);
+        this.recoveryFailed = false;
     }
 
     public Surface getCodecSurface() {
@@ -278,26 +281,42 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     private void onRenderTick() {
-        if (!running || !eglContext.isInitialized()) return;
+        if (!running || recoveryFailed || !eglContext.isInitialized()) return;
 
-        if (!eglContext.makeCurrent()) return;
+        if (!eglContext.makeCurrent()) {
+            LimeLog.warning("PostProcess: EGL context lost, stopping renderer");
+            recoveryFailed = true;
+            return;
+        }
 
         long nowNs = System.nanoTime();
         lastTickNs = nowNs;
 
         boolean isBlack = bfiScheduler.nextIsBlack();
         boolean haveNewFrame = surfaceTextureReady && frameAvailable;
+        boolean frameStalled = haveNewFrame && (nowNs - lastFrameArrivalNs) > FRAME_STALL_TIMEOUT_NS;
+
+        if (frameStalled) {
+            LimeLog.warning("PostProcess: frame stall detected, forcing black");
+            frameAvailable = false;
+        }
 
         totalRenderCalls++;
 
-        if (isBlack) {
+        if (isBlack || frameStalled) {
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
         } else if (haveNewFrame) {
             frameAvailable = false;
             lastFrameDrawStartNs = nowNs;
 
-            surfaceTexture.updateTexImage();
+            try {
+                surfaceTexture.updateTexImage();
+            } catch (Exception e) {
+                LimeLog.warning("PostProcess: updateTexImage failed: " + e.getMessage());
+                recoveryFailed = true;
+                return;
+            }
 
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
@@ -345,7 +364,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             framesSkippedNoInput++;
         }
 
-        eglContext.swapBuffers();
+        if (!recoveryFailed) {
+            eglContext.swapBuffers();
+        }
 
         statsFrameCount++;
         if (statsFrameCount >= STATS_INTERVAL_FRAMES) {
@@ -353,7 +374,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             statsFrameCount = 0;
         }
 
-        if (running) {
+        if (running && !recoveryFailed) {
             scheduleNextTick(nowNs);
         }
     }
@@ -423,6 +444,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             eglContext = null;
         }
         surfaceTextureReady = false;
+        recoveryFailed = false;
         LimeLog.info("PostProcess: GL released");
     }
 
