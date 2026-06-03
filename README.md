@@ -72,6 +72,7 @@ The main repo had stayed silent for 5 months, with nobody actually responding to
 * Run ‘git submodule update --init --recursive’ from within moonlight-android/
 * In moonlight-android/, create a file called ‘local.properties’. Add an ‘ndk.dir=’ property to the local.properties file and set it equal to your NDK directory.
 * Build the APK using Android Studio or gradle
+* Install updated builds with `adb install -r <apk>` so app data stays in place; uninstalling the package clears the saved unique ID and paired server certificate, which forces re-pairing
 
 ## Authors
 

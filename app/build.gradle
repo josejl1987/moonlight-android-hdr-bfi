@@ -69,7 +69,7 @@ android {
     }
 
     lint {
-        disable 'MissingTranslation'
+        disable 'MissingTranslation', 'ExtraTranslation'
         lintConfig file('lint.xml')
     }
 

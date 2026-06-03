@@ -24,10 +24,14 @@ import com.limelight.binding.input.touch.TrackpadContext;
 import com.limelight.binding.input.virtual_controller.VirtualController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
+import com.limelight.binding.video.BfiOnlyRenderer;
+import com.limelight.binding.video.BfiScheduler;
 import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
+import com.limelight.binding.video.PostProcessStatusListener;
+import com.limelight.binding.video.PostProcessVideoRenderer;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
 import com.limelight.nvstream.StreamConfiguration;
@@ -63,6 +67,7 @@ import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
@@ -91,6 +96,7 @@ import android.view.InputDevice;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.ViewGroup;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.View;
@@ -103,6 +109,13 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ImageButton;
@@ -140,7 +153,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         OnGenericMotionListener, OnTouchListener, NvConnectionListener, EvdevListener,
         OnSystemUiVisibilityChangeListener, GameGestures, StreamContainer.InputCallbacks,
         ExternalControllerView.InputCallbacks,
-        PerfOverlayListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
+        PerfOverlayListener, PostProcessStatusListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
     public static Game instance;
 
     private int lastButtonState = 0;
@@ -224,6 +237,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean overlayToggleZoomButtonShown;
     private TextView notificationOverlayView;
     private int requestedNotificationOverlayVisibility = View.GONE;
+    private TextView postProcessOverlayView;
     private View performanceOverlayView;
 
     private TextView performanceOverlayLite;
@@ -231,6 +245,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private TextView performanceOverlayBig;
 
     private MediaCodecDecoderRenderer decoderRenderer;
+    private PostProcessVideoRenderer postProcessRenderer;
+    private BfiOnlyRenderer bfiOnlyRenderer;
     private boolean reportedCrash;
 
     private WifiManager.WifiLock highPerfWifiLock;
@@ -516,6 +532,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         notificationOverlayView = findViewById(R.id.notificationOverlay);
+        postProcessOverlayView = findViewById(R.id.postProcessOverlay);
+        if (postProcessOverlayView != null) {
+            postProcessOverlayView.setOnClickListener(v -> showPostProcessQuickPanel());
+        }
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
 
@@ -864,15 +884,117 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // The connection will be started when the surface gets created
         //streamContainer.getHolder().addCallback(this);
 
+        final boolean finalWillStreamHdr = willStreamHdr;
+        final Display finalCurrentDisplay = currentDisplay;
         streamContainer.setOnSurfaceAvailable(() -> {
             if (!attemptedConnection) {
-                LimeLog.info("Surface is available, starting connection...");
                 attemptedConnection = true;
 
-                // Der Decoder erhält die jeweils aktive Oberfläche vom Container
-                decoderRenderer.setRenderTarget(streamContainer.getSurface());
+                Surface renderSurface = streamContainer.getSurface();
 
-                // Starten Sie die NvConnection
+                PostProcessVideoRenderer.Decision ppDecision =
+                        PostProcessVideoRenderer.decide(
+                                prefConfig,
+                                displayRefreshRate,
+                                finalWillStreamHdr);
+
+                if (ppDecision.enabled) {
+                    try {
+                        postProcessRenderer = new PostProcessVideoRenderer(
+                                Game.this,
+                                renderSurface,
+                                prefConfig,
+                                prefConfig.fps,
+                                displayRefreshRate,
+                                finalWillStreamHdr,
+                                getWindow(),
+                                finalCurrentDisplay,
+                                Game.this
+                        );
+                        if (postProcessRenderer.startBlocking()) {
+                            decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
+                            LimeLog.info("Post-process renderer enabled");
+                            showPostProcessOverlay(true);
+                        } else {
+                            LimeLog.warning("Post-process renderer init failed; falling back to direct surface");
+                            postProcessRenderer.release();
+                            postProcessRenderer = null;
+                            decoderRenderer.setRenderTarget(renderSurface);
+                            showPostProcessOverlay(false);
+                        }
+                    } catch (Throwable t) {
+                        LimeLog.warning("Post-process renderer exception; falling back to direct surface: " + t);
+                        if (postProcessRenderer != null) {
+                            postProcessRenderer.release();
+                            postProcessRenderer = null;
+                        }
+                        decoderRenderer.setRenderTarget(renderSurface);
+                        showPostProcessOverlay(false);
+                    }
+                } else if (finalWillStreamHdr
+                        && prefConfig.videoBlackFrameInsertion
+                        && new BfiScheduler().canEnable(prefConfig.fps, displayRefreshRate,
+                                Math.max(1, prefConfig.videoBfiDarkFrames))) {
+                    // BFI fast path: libretro path is disabled (e.g. user set
+                    // the post-process renderer to OFF) but host HDR is on and
+                    // BFI is requested and the display refresh matches. A new
+                    // BfiOnlyRenderer owns its own EGL HDR10 surface + OES
+                    // adapter, alternating source/black frames at the BFI
+                    // cadence. Bypasses the libretro composite entirely.
+                    try {
+                        bfiOnlyRenderer = new BfiOnlyRenderer(
+                                Game.this,
+                                renderSurface,
+                                prefConfig,
+                                prefConfig.fps,
+                                displayRefreshRate,
+                                getWindow(),
+                                finalCurrentDisplay,
+                                Game.this
+                        );
+                        if (bfiOnlyRenderer != null && bfiOnlyRenderer.startBlocking()) {
+                            decoderRenderer.setRenderTarget(bfiOnlyRenderer.getCodecSurface());
+                            LimeLog.info("BFI-only fast path enabled");
+                            showPostProcessOverlay(true);
+                        } else {
+                            String msg = "BFI fast path unavailable on this device";
+                            LimeLog.warning(msg);
+                            if (bfiOnlyRenderer != null) {
+                                bfiOnlyRenderer.release();
+                                bfiOnlyRenderer = null;
+                            }
+                            decoderRenderer.setRenderTarget(renderSurface);
+                            showPostProcessOverlay(false);
+                            Toast.makeText(Game.this, msg, Toast.LENGTH_LONG).show();
+                        }
+                    } catch (Throwable t) {
+                        LimeLog.warning("BFI fast path exception; falling back to direct surface: " + t);
+                        if (bfiOnlyRenderer != null) {
+                            bfiOnlyRenderer.release();
+                            bfiOnlyRenderer = null;
+                        }
+                        decoderRenderer.setRenderTarget(renderSurface);
+                        showPostProcessOverlay(false);
+                    }
+                } else {
+                    // Direct surface fallback. Override the reason text when
+                    // the user has BFI requested but the display refresh rate
+                    // does not match — the existing ppDecision.reason is
+                    // tailored to the libretro path and would be confusing.
+                    String reason = ppDecision.reason;
+                    if (finalWillStreamHdr
+                            && prefConfig.videoBlackFrameInsertion
+                            && !new BfiScheduler().canEnable(prefConfig.fps, displayRefreshRate,
+                                    Math.max(1, prefConfig.videoBfiDarkFrames))) {
+                        int requiredHz = Math.round(prefConfig.fps
+                                * (1 + Math.max(1, prefConfig.videoBfiDarkFrames)));
+                        reason = "BFI fast path requires display refresh ~ " + requiredHz + " Hz";
+                    }
+                    Toast.makeText(Game.this, reason, Toast.LENGTH_LONG).show();
+                    decoderRenderer.setRenderTarget(renderSurface);
+                    showPostProcessOverlay(false);
+                }
+
                 conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
                         decoderRenderer, Game.this);
             }
@@ -1237,6 +1359,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 performanceOverlayView.setVisibility(View.GONE);
                 notificationOverlayView.setVisibility(View.GONE);
+                if (postProcessOverlayView != null) {
+                    postProcessOverlayView.setVisibility(View.GONE);
+                }
 
                 // Disable sensors while in PiP mode
                 controllerHandler.disableSensors();
@@ -1274,6 +1399,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 }
 
                 notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
+                if (postProcessRenderer != null && postProcessOverlayView != null) {
+                    postProcessOverlayView.setVisibility(View.VISIBLE);
+                }
 
                 // Enable sensors again after exiting PiP
                 controllerHandler.enableSensors();
@@ -1737,6 +1865,19 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             unbindService(usbDriverServiceConnection);
         }
 
+        if (postProcessRenderer != null) {
+            postProcessRenderer.release();
+            postProcessRenderer = null;
+        }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.release();
+            bfiOnlyRenderer = null;
+        }
+        if (postProcessOverlayView != null) {
+            postProcessOverlayView.setVisibility(View.GONE);
+            postProcessOverlayView.setText("");
+        }
+
         // Destroy the capture provider
         inputCaptureProvider.destroy();
         streamContainer.onDestroy();
@@ -1774,6 +1915,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if(keyBoardLayoutController!=null){
             keyBoardLayoutController.hide();
         }
+
+        if (postProcessRenderer != null) {
+            postProcessRenderer.release();
+            postProcessRenderer = null;
+        }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.release();
+            bfiOnlyRenderer = null;
+        }
+        showPostProcessOverlay(false);
 
         if (conn != null) {
             int videoFormat = decoderRenderer.getActiveVideoFormat();
@@ -3440,6 +3591,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (connecting || connected) {
             connecting = connected = false;
             updatePipAutoEnter();
+            showPostProcessOverlay(false);
 
             controllerHandler.stop();
 
@@ -3942,6 +4094,174 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     @Override
+    public void onPostProcessStatusUpdate(final String text) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (postProcessOverlayView != null) {
+                    postProcessOverlayView.setText(text);
+                    postProcessOverlayView.setVisibility(isHidingOverlays ? View.GONE : View.VISIBLE);
+                }
+            }
+        });
+    }
+
+    @Override
+    public void onPostProcessHdrModeChanged(final boolean hdrActive) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getWindow().setColorMode(hdrActive
+                            ? ActivityInfo.COLOR_MODE_HDR
+                            : ActivityInfo.COLOR_MODE_DEFAULT);
+                    LimeLog.info("Display: setColorMode(" + (hdrActive ? "HDR" : "DEFAULT") + ")");
+                }
+            }
+        });
+    }
+
+    public void showPostProcessQuickPanel() {
+        // Always allow the panel so the user can adjust settings, even if
+        // the renderer is inactive (init failed, currently stopped, etc.).
+        // Settings are persisted and applied on the next connection.
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (getResources().getDisplayMetrics().density * 16);
+        root.setPadding(pad, pad, pad, pad);
+        scrollView.addView(root, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        // Diagnostic status
+        TextView status = new TextView(this);
+        status.setText(postProcessRenderer != null
+                ? "Renderer: active \u2014 brightness/BFI apply live; HDR mode changes need reconnect"
+                : "Renderer: inactive \u2014 settings apply on next stream start");
+        status.setPadding(0, 0, 0, pad);
+        root.addView(status);
+
+        // Renderer mode
+        final Spinner rendererSpinner = createSpinner(root,
+                getString(R.string.title_postprocess_renderer),
+                R.array.postprocess_renderer_names,
+                R.array.postprocess_renderer_values,
+                prefConfig.postProcessRendererMode);
+
+        // HDR mode
+        final Spinner hdrModeSpinner = createSpinner(root,
+                getString(R.string.title_video_hdr_mode),
+                R.array.video_hdr_mode_names,
+                R.array.video_hdr_mode_values,
+                prefConfig.videoHdrMode);
+
+        // Brightness
+        TextView brightnessLabel = new TextView(this);
+        brightnessLabel.setText(getString(R.string.title_video_hdr_paper_white));
+        brightnessLabel.setPadding(0, 0, 0, 8);
+        root.addView(brightnessLabel);
+        final android.widget.EditText brightnessEdit = new android.widget.EditText(this);
+        brightnessEdit.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        brightnessEdit.setText(Integer.toString(prefConfig.videoHdrPaperWhiteNits));
+        root.addView(brightnessEdit);
+
+        // BFI
+        final CheckBox bfiCheck = new CheckBox(this);
+        bfiCheck.setText(R.string.title_video_bfi);
+        bfiCheck.setChecked(prefConfig.videoBlackFrameInsertion);
+        root.addView(bfiCheck);
+
+        // BFI dark frames
+        final Spinner darkFrameSpinner = createSpinner(root,
+                getString(R.string.title_video_bfi_dark_frames),
+                R.array.video_bfi_dark_frames_names,
+                R.array.video_bfi_dark_frames_values,
+                prefConfig.videoBfiDarkFrames);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.game_menu_postprocess_quick_setup)
+                .setView(scrollView)
+                .setPositiveButton("Apply", (dialog, which) -> {
+                    prefConfig.postProcessRendererMode = spinnerValue(rendererSpinner);
+                    prefConfig.videoHdrMode = spinnerValue(hdrModeSpinner);
+                    try {
+                        prefConfig.videoHdrPaperWhiteNits = Integer.parseInt(brightnessEdit.getText().toString().trim());
+                    } catch (NumberFormatException e) {
+                        prefConfig.videoHdrPaperWhiteNits = 200;
+                    }
+                    prefConfig.videoBlackFrameInsertion = bfiCheck.isChecked();
+                    prefConfig.videoBfiDarkFrames = spinnerValue(darkFrameSpinner);
+                    persistAndApplyPostProcessSettings();
+                })
+                .setNeutralButton("Cancel", null)
+                .show();
+    }
+
+    private Spinner createSpinner(LinearLayout parent, String label,
+                                   int namesArrayRes, int valuesArrayRes, int currentValue) {
+        TextView textView = new TextView(this);
+        textView.setText(label);
+        textView.setPadding(0, 0, 0, 8);
+        parent.addView(textView);
+
+        Spinner spinner = new Spinner(this);
+        String[] names = getResources().getStringArray(namesArrayRes);
+        int[] values = intArray(valuesArrayRes);
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, names);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setTag(values);
+        spinner.setSelection(indexOfValue(values, currentValue));
+        parent.addView(spinner);
+        return spinner;
+    }
+
+    private int[] intArray(int arrayRes) {
+        String[] strings = getResources().getStringArray(arrayRes);
+        int[] values = new int[strings.length];
+        for (int i = 0; i < strings.length; i++) {
+            values[i] = Integer.parseInt(strings[i]);
+        }
+        return values;
+    }
+
+    private int indexOfValue(int[] values, int currentValue) {
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == currentValue) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private int spinnerValue(Spinner spinner) {
+        int position = spinner.getSelectedItemPosition();
+        int[] values = (int[]) spinner.getTag();
+        if (values == null || position < 0 || position >= values.length) {
+            return 0;
+        }
+        return values[position];
+    }
+
+    private void persistAndApplyPostProcessSettings() {
+        SharedPreferences.Editor editor = PreferenceManager.getDefaultSharedPreferences(this).edit();
+        PreferenceConfiguration.writePostProcessPreferences(editor, prefConfig);
+        editor.apply();
+
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings();
+            showPostProcessOverlay(true);
+        } else {
+            Toast.makeText(this,
+                    "Saved. Restart stream or set renderer to Force before connecting.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
     public void onUsbPermissionPromptStarting() {
         // Disable PiP auto-enter while the USB permission prompt is on-screen. This prevents
         // us from entering PiP while the user is interacting with the OS permission dialog.
@@ -4203,6 +4523,21 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             }
         } else {
             performanceOverlayView.setVisibility(View.GONE);
+        }
+    }
+
+    private void showPostProcessOverlay(boolean visible) {
+        if (postProcessOverlayView == null) {
+            return;
+        }
+
+        if (visible && isHidingOverlays) {
+            return;
+        }
+
+        postProcessOverlayView.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (!visible) {
+            postProcessOverlayView.setText("");
         }
     }
 
