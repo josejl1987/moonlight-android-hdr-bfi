@@ -16,15 +16,22 @@ public final class BfiScheduler {
     private int darkFrames = 1;
     private int phase = 0;
 
-    public boolean canEnable(float streamFps, float displayHz) {
-        float required = streamFps * (1.0f + darkFrames);
-        return Math.abs(displayHz - required) <= 3.0f;
+    public boolean canEnable(float streamFps, float displayHz, int darkFrames) {
+        if (streamFps <= 0.0f || displayHz <= 0.0f) {
+            return false;
+        }
+        int clampedDarkFrames = Math.max(1, darkFrames);
+        float requiredHz = streamFps * (1.0f + clampedDarkFrames);
+        return Math.abs(displayHz - requiredHz) <= 3.0f;
     }
 
     public void configure(boolean enabled, int darkFrames) {
         this.enabled = enabled;
         this.darkFrames = Math.max(1, darkFrames);
         this.phase = 0;
+        if (!enabled) {
+            phase = 0;
+        }
     }
 
     public boolean nextIsBlack() {
@@ -36,7 +43,7 @@ public final class BfiScheduler {
         return black;
     }
 
-    public void reset() {
+    public void resetToVisiblePhase() {
         phase = 0;
     }
 

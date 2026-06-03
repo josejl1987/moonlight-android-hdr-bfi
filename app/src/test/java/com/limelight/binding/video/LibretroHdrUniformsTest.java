@@ -39,10 +39,11 @@ public class LibretroHdrUniformsTest {
 
     @Test
     public void gamutEnumValuesMatchLibretroSpec() {
-        // 0 = accurate, 1 = BT.2020, 2 = P3, 3 = expanded
+        // 0 = accurate (Rec.709->Rec.2020), 1 = expanded (Expanded709->Rec.2020),
+        // 2 = wide (P3->Rec.2020), 3 = super (passthrough)
         assertEquals(0, LibretroHdrUniforms.GAMUT_ACCURATE);
-        assertEquals(1, LibretroHdrUniforms.GAMUT_BT2020);
-        assertEquals(2, LibretroHdrUniforms.GAMUT_P3);
-        assertEquals(3, LibretroHdrUniforms.GAMUT_EXPANDED);
+        assertEquals(1, LibretroHdrUniforms.GAMUT_EXPANDED);
+        assertEquals(2, LibretroHdrUniforms.GAMUT_WIDE);
+        assertEquals(3, LibretroHdrUniforms.GAMUT_SUPER);
     }
 }

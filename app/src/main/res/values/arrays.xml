@@ -260,6 +260,18 @@
         <item>3</item>
     </string-array>
 
+    <!-- BFI brightness compensation: 0 = off, 1 = conservative, 2 = full -->
+    <string-array name="video_bfi_compensation_names">
+        <item>@string/bfi_comp_off</item>
+        <item>@string/bfi_comp_conservative</item>
+        <item>@string/bfi_comp_full</item>
+    </string-array>
+    <string-array name="video_bfi_compensation_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </string-array>
+
     <!-- Paper white nits (RetroArch default is 200). -->
     <string-array name="paper_white_nits_names">
         <item>@string/paper_white_150</item>

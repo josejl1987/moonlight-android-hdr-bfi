@@ -45,9 +45,13 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private Handler renderHandler;
 
     private int program;
+    private int oesAdapterProgram;
     private int textureId;
+    private int sourceTexture2d;
+    private int sourceFramebuffer;
     private FloatBuffer quadVertexBuffer;
     private FloatBuffer texCoordBuffer;
+    private final float[] surfaceTransform = new float[16];
 
     private volatile boolean running;
     private volatile boolean frameAvailable;
@@ -256,8 +260,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         GLES20.glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
 
         surfaceTexture = new SurfaceTexture(textureId);
-        surfaceTexture.setOnFrameAvailableListener(this);
+        surfaceTexture.setDefaultBufferSize(prefConfig.width, prefConfig.height);
+        surfaceTexture.setOnFrameAvailableListener(this, renderHandler);
         codecSurface = new Surface(surfaceTexture);
+
+        createSourceTexture(prefConfig.width, prefConfig.height);
 
         String vertexSource = readRawResource(com.limelight.R.raw.libretro_hdr_video);
         String fragmentSource = loadFragmentWithIncludes();
@@ -265,6 +272,17 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         program = createProgram(vertexSource, fragmentSource);
         if (program == 0) {
             LimeLog.warning("PostProcess: shader compile failed");
+            running = false;
+            recoveryFailed = true;
+            if (initLatch != null) initLatch.countDown();
+            return;
+        }
+
+        String adapterVertexSource = readRawResource(com.limelight.R.raw.oes_adapter_vert);
+        String adapterFragmentSource = readRawResource(com.limelight.R.raw.oes_adapter_frag);
+        oesAdapterProgram = createProgram(adapterVertexSource, adapterFragmentSource);
+        if (oesAdapterProgram == 0) {
+            LimeLog.warning("PostProcess: OES adapter shader compile failed");
             running = false;
             recoveryFailed = true;
             if (initLatch != null) initLatch.countDown();
@@ -281,7 +299,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         uInverseTonemapLoc = GLES20.glGetUniformLocation(program, "InverseTonemap");
         uHdr10Loc          = GLES20.glGetUniformLocation(program, "HDR10");
         uHdrModeLoc        = GLES20.glGetUniformLocation(program, "HDRMode");
-        uTextureLoc        = GLES20.glGetUniformLocation(program, "SourceOES");
+        uTextureLoc        = GLES20.glGetUniformLocation(program, "Source");
 
         quadVertexBuffer = ByteBuffer.allocateDirect(QUAD_VERTICES.length * 4)
                 .order(ByteOrder.nativeOrder())
@@ -328,6 +346,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         if (frameAvailable && surfaceTextureReady) {
             try {
                 surfaceTexture.updateTexImage();
+                surfaceTexture.getTransformMatrix(surfaceTransform);
             } catch (Exception e) {
                 LimeLog.warning("PostProcess: updateTexImage failed: " + e.getMessage());
                 recoveryFailed = true;
@@ -337,6 +356,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             hasValidTextureFrame = true;
             lastFrameDrawStartNs = nowNs;
             consumedNewFrame = true;
+            int[] viewport = new int[4];
+            GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, viewport, 0);
+            renderOesToSourceTexture();
+            GLES20.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         }
 
         totalRenderCalls++;
@@ -351,17 +374,27 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             GLES20.glUseProgram(program);
 
             // Effective BrightnessNits: libretro shader math stays untouched.
-            // The only Artemis deviation is multiplying BrightnessNits by
-            // (1 + darkFrames) on visible frames when BFI compensation is on,
-            // so the user still sees the same paper white despite the dark
-            // refreshes.
+            // The only Artemis deviation is adjusting BrightnessNits on visible
+            // frames when BFI compensation is enabled.
             float baseBrightnessNits = hdrUniforms.brightnessNits;
-            if (bfiScheduler.isEnabled() && prefConfig.videoBfiBrightnessCompensation) {
-                baseBrightnessNits *= (1.0f + bfiScheduler.getDarkFrames());
+            if (bfiScheduler.isEnabled()) {
+                int darkFrames = bfiScheduler.getDarkFrames();
+                float fullScale = 1.0f + darkFrames;
+                switch (prefConfig.videoBfiCompensationMode) {
+                    case PreferenceConfiguration.BFI_COMP_CONSERVATIVE:
+                        baseBrightnessNits *= Math.min(fullScale, 1.6f);
+                        break;
+                    case PreferenceConfiguration.BFI_COMP_FULL:
+                        baseBrightnessNits *= fullScale;
+                        break;
+                    default:
+                        // OFF: no change
+                        break;
+                }
             }
 
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureId);
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
             GLES20.glUniform1i(uTextureLoc, 0);
 
             if (uMvpLoc >= 0) {
@@ -467,6 +500,18 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 GLES20.glDeleteProgram(program);
                 program = 0;
             }
+            if (oesAdapterProgram != 0) {
+                GLES20.glDeleteProgram(oesAdapterProgram);
+                oesAdapterProgram = 0;
+            }
+            if (sourceFramebuffer != 0) {
+                GLES20.glDeleteFramebuffers(1, new int[]{sourceFramebuffer}, 0);
+                sourceFramebuffer = 0;
+            }
+            if (sourceTexture2d != 0) {
+                GLES20.glDeleteTextures(1, new int[]{sourceTexture2d}, 0);
+                sourceTexture2d = 0;
+            }
             if (textureId != 0) {
                 GLES20.glDeleteTextures(1, new int[]{textureId}, 0);
                 textureId = 0;
@@ -500,25 +545,23 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         int requestedHdrMode = hostHdrStreamActive
                 ? LibretroHdrUniforms.HDR_MODE_OFF
                 : prefConfig.videoHdrMode;
-        // The libretro spec only defines modes 0..2 on the user-facing path;
-        // mode 3 (PQ->scRGB) is reserved for shader-emitted PQ, not user
-        // preference. Clamp to the user range here.
-        hdrUniforms.hdrMode = Math.max(LibretroHdrUniforms.HDR_MODE_OFF,
-                Math.min(LibretroHdrUniforms.HDR_MODE_SCRGB, requestedHdrMode));
+        // HDR10 is not yet implemented; clamp to OFF/SCRGB only.
+        hdrUniforms.hdrMode = (requestedHdrMode == LibretroHdrUniforms.HDR_MODE_SCRGB)
+                ? LibretroHdrUniforms.HDR_MODE_SCRGB
+                : LibretroHdrUniforms.HDR_MODE_OFF;
 
         hdrUniforms.brightnessNits  = Math.max(80, prefConfig.videoHdrPaperWhiteNits);
         hdrUniforms.expandGamut     = clampGamut(prefConfig.videoHdrExpandGamut);
         hdrUniforms.subpixelLayout  = clampSubpixel(prefConfig.videoHdrSubpixelLayout);
         hdrUniforms.scanlines       = prefConfig.videoHdrScanlines ? 1.0f : 0.0f;
-        hdrUniforms.inverseTonemap  = (prefConfig.videoHdrMode == LibretroHdrUniforms.HDR_MODE_SCRGB) ? 1.0f : 0.0f;
-        hdrUniforms.hdr10           = (prefConfig.videoHdrMode == LibretroHdrUniforms.HDR_MODE_HDR10
-                                    || prefConfig.videoHdrMode == LibretroHdrUniforms.HDR_MODE_SCRGB) ? 1.0f : 0.0f;
+        hdrUniforms.inverseTonemap  = (hdrUniforms.hdrMode != LibretroHdrUniforms.HDR_MODE_OFF) ? 1.0f : 0.0f;
+        hdrUniforms.hdr10           = 0.0f;
 
         bfiScheduler.configure(
                 prefConfig.videoBlackFrameInsertion,
                 Math.max(1, prefConfig.videoBfiDarkFrames));
         boolean bfiActive = bfiScheduler.isEnabled()
-                && bfiScheduler.canEnable(streamFps, displayRefreshRate);
+                && bfiScheduler.canEnable(streamFps, displayRefreshRate, prefConfig.videoBfiDarkFrames);
 
         if (logChanges) {
             LimeLog.info("PostProcess: HDR mode=" + hdrUniforms.hdrMode
@@ -530,7 +573,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                     + " bfiEnabled=" + bfiScheduler.isEnabled()
                     + " bfiActive=" + bfiActive
                     + " darkFrames=" + bfiScheduler.getDarkFrames()
-                    + " bfiCompensation=" + prefConfig.videoBfiBrightnessCompensation);
+                    + " bfiCompensation=" + prefConfig.videoBfiCompensationMode);
         }
 
         dispatchStatus(bfiActive);
@@ -576,9 +619,17 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             sb.append(" | BFI ").append(bfiScheduler.getDarkFrames()).append(" dark");
             sb.append(" | cycle ").append(1 + bfiScheduler.getDarkFrames()).append(" refreshes");
             sb.append(" | phase ").append(blackFrameActive ? "black" : "visible");
-            if (prefConfig.videoBfiBrightnessCompensation) {
-                float factor = 1.0f + bfiScheduler.getDarkFrames();
-                sb.append(" | boost ").append(String.format(java.util.Locale.US, "%.2fx", factor));
+            switch (prefConfig.videoBfiCompensationMode) {
+                case PreferenceConfiguration.BFI_COMP_CONSERVATIVE:
+                    float conservativeFactor = Math.min(1.0f + bfiScheduler.getDarkFrames(), 1.6f);
+                    sb.append(" | boost ").append(String.format(java.util.Locale.US, "%.2fx", conservativeFactor));
+                    break;
+                case PreferenceConfiguration.BFI_COMP_FULL:
+                    float fullFactor = 1.0f + bfiScheduler.getDarkFrames();
+                    sb.append(" | boost ").append(String.format(java.util.Locale.US, "%.2fx", fullFactor));
+                    break;
+                default:
+                    break;
             }
         } else {
             sb.append(" | BFI off");
@@ -595,7 +646,12 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         if (!caps.supportsPostProcess) {
             return "SDR";
         }
-        return resolveHdrMode(caps) == LibretroHdrUniforms.HDR_MODE_SCRGB ? "scRGB" : "SDR";
+        int mode = resolveHdrMode(caps);
+        if (mode == LibretroHdrUniforms.HDR_MODE_HDR10) {
+            LimeLog.info("PostProcess: HDR10 requested but GLES PQ branch is not implemented yet; using scRGB/SDR fallback");
+            return caps.supportsScRgb ? "scRGB" : "SDR";
+        }
+        return mode == LibretroHdrUniforms.HDR_MODE_SCRGB ? "scRGB" : "SDR";
     }
 
     private int resolveHdrMode(PostProcessCapabilities caps) {
@@ -605,35 +661,89 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         switch (prefConfig.videoHdrMode) {
             case LibretroHdrUniforms.HDR_MODE_SCRGB:
+                return caps.supportsScRgb ? LibretroHdrUniforms.HDR_MODE_SCRGB : LibretroHdrUniforms.HDR_MODE_OFF;
             case LibretroHdrUniforms.HDR_MODE_HDR10:
+                // HDR10 is not yet implemented; fall back to scRGB or SDR
                 return caps.supportsScRgb ? LibretroHdrUniforms.HDR_MODE_SCRGB : LibretroHdrUniforms.HDR_MODE_OFF;
             default:
                 return LibretroHdrUniforms.HDR_MODE_OFF;
         }
     }
 
+    private void createSourceTexture(int width, int height) {
+        int[] tex = new int[1];
+        GLES20.glGenTextures(1, tex, 0);
+        sourceTexture2d = tex[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
+                width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+
+        int[] fbo = new int[1];
+        GLES20.glGenFramebuffers(1, fbo, 0);
+        sourceFramebuffer = fbo[0];
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, sourceFramebuffer);
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, sourceTexture2d, 0);
+
+        int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            throw new IllegalStateException("OES adapter framebuffer incomplete: 0x" + Integer.toHexString(status));
+        }
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+    }
+
+    private void renderOesToSourceTexture() {
+        if (oesAdapterProgram == 0 || sourceFramebuffer == 0) {
+            return;
+        }
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, sourceFramebuffer);
+        GLES20.glViewport(0, 0, prefConfig.width, prefConfig.height);
+
+        GLES20.glUseProgram(oesAdapterProgram);
+
+        int posHandle = GLES20.glGetAttribLocation(oesAdapterProgram, "aPosition");
+        int texHandle = GLES20.glGetAttribLocation(oesAdapterProgram, "aTexCoord");
+        int transformLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexTransform");
+
+        GLES20.glUniformMatrix4fv(transformLoc, 1, false, surfaceTransform, 0);
+
+        int adapterTextureLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexture");
+        GLES20.glUniform1i(adapterTextureLoc, 0);
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureId);
+
+        GLES20.glEnableVertexAttribArray(posHandle);
+        GLES20.glVertexAttribPointer(posHandle, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
+        GLES20.glEnableVertexAttribArray(texHandle);
+        GLES20.glVertexAttribPointer(texHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+
+        GLES20.glDisableVertexAttribArray(posHandle);
+        GLES20.glDisableVertexAttribArray(texHandle);
+
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+    }
+
     private String loadFragmentWithIncludes() {
         // GLES raw resources do not understand #include, so we manually
-        // splice the common header in front of the composite body. The
-        // composite file references "libretro_hdr_common.glsl" and
-        // "libretro_hdr_tonemap.frag" verbatim; we replace those includes
-        // with the actual file contents.
+        // splice the common header in front of the composite body.
         String composite = readRawResource(com.limelight.R.raw.libretro_hdr_composite);
         String common   = readRawResource(com.limelight.R.raw.libretro_hdr_common);
-        String tonemap  = readRawResource(com.limelight.R.raw.libretro_hdr_tonemap);
 
-        if (composite == null || common == null || tonemap == null) {
+        if (composite == null || common == null) {
             LimeLog.warning("PostProcess: missing libretro HDR shader source");
             return composite;
         }
 
-        // The Vulkan libretro shaders use "#include <filename>". The
-        // Android raw resources cannot resolve them, so do the splice
-        // here. Order matters: include the common header (defines the
-        // UBO and matrices) before the tonemap file.
-        return composite
-                .replace("#include \"libretro_hdr_common.glsl\"", common)
-                .replace("#include \"libretro_hdr_tonemap.frag\"", tonemap);
+        return composite.replace("#include \"libretro_hdr_common.glsl\"", common);
     }
 
     private String readRawResource(int resId) {

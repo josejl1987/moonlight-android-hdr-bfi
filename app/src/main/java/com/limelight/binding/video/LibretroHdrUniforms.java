@@ -21,10 +21,10 @@ public final class LibretroHdrUniforms {
     public static final int HDR_MODE_SCRGB       = 2;
     public static final int HDR_MODE_PQ_TO_SCRGB = 3;
 
-    public static final int GAMUT_ACCURATE = 0;
-    public static final int GAMUT_BT2020   = 1;
-    public static final int GAMUT_P3       = 2;
-    public static final int GAMUT_EXPANDED = 3;
+    public static final int GAMUT_ACCURATE = 0;  // Rec.709 -> Rec.2020 (proper)
+    public static final int GAMUT_EXPANDED = 1;  // Expanded709 -> Rec.2020
+    public static final int GAMUT_WIDE     = 2;  // P3 -> Rec.2020
+    public static final int GAMUT_SUPER    = 3;  // passthrough (max boost)
 
     public static final int SUBPIXEL_RGB   = 0;
     public static final int SUBPIXEL_BGR   = 1;

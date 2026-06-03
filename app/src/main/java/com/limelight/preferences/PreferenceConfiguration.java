@@ -119,7 +119,7 @@ public class PreferenceConfiguration {
     private static final String VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING = "list_video_hdr_subpixel_layout";
     private static final String VIDEO_BFI_PREF_STRING = "checkbox_video_bfi";
     private static final String VIDEO_BFI_DARK_FRAMES_PREF_STRING = "list_video_bfi_dark_frames";
-    private static final String VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING = "checkbox_video_bfi_brightness_compensation";
+    private static final String VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING = "list_video_bfi_compensation";
 
     private static final String CHECKBOX_ENABLE_QUIT_DIALOG = "checkbox_enable_quit_dialog";
 
@@ -227,7 +227,7 @@ public class PreferenceConfiguration {
     private static final String DEFAULT_VIDEO_HDR_SUBPIXEL_LAYOUT = "0";
     private static final boolean DEFAULT_VIDEO_BFI = false;
     private static final String DEFAULT_VIDEO_BFI_DARK_FRAMES = "1";
-    private static final boolean DEFAULT_VIDEO_BFI_BRIGHTNESS_COMPENSATION = false;
+    private static final String DEFAULT_VIDEO_BFI_COMPENSATION = "0";
 
     private static final boolean DEFAULT_REMEMBER_ZOOM_PAN = false;
     private static final float DEFAULT_ZOOM_SCALE = 1.0f;
@@ -242,13 +242,17 @@ public class PreferenceConfiguration {
     public static final int VIDEO_HDR_HDR10 = 1;
     public static final int VIDEO_HDR_SCRGB = 2;
 
-    public static final int HDR_GAMUT_ACCURATE = 0;
-    public static final int HDR_GAMUT_BT2020 = 1;
-    public static final int HDR_GAMUT_P3 = 2;
-    public static final int HDR_GAMUT_EXPANDED = 3;
+    public static final int HDR_GAMUT_ACCURATE = 0;  // Rec.709 -> Rec.2020 (proper)
+    public static final int HDR_GAMUT_EXPANDED = 1;  // Expanded709 -> Rec.2020
+    public static final int HDR_GAMUT_WIDE = 2;      // P3 -> Rec.2020
+    public static final int HDR_GAMUT_SUPER = 3;      // passthrough (max boost)
 
     public static final int HDR_SUBPIXEL_RGB = 0;
     public static final int HDR_SUBPIXEL_BGR = 1;
+
+    public static final int BFI_COMP_OFF = 0;
+    public static final int BFI_COMP_CONSERVATIVE = 1;
+    public static final int BFI_COMP_FULL = 2;
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -309,7 +313,7 @@ public class PreferenceConfiguration {
     public int videoHdrSubpixelLayout;
     public boolean videoBlackFrameInsertion;
     public int videoBfiDarkFrames;
-    public boolean videoBfiBrightnessCompensation;
+    public int videoBfiCompensationMode;
 
     public float parallax_depth;
 
@@ -518,6 +522,14 @@ public class PreferenceConfiguration {
 
     private static int getHeightFromResolutionString(String resString) {
         return Integer.parseInt(resString.split("x")[1]);
+    }
+
+    private static int getIntPref(SharedPreferences prefs, String key, String defaultValue) {
+        try {
+            return Integer.parseInt(prefs.getString(key, defaultValue));
+        } catch (RuntimeException e) {
+            return Integer.parseInt(defaultValue);
+        }
     }
 
     private static String getResolutionString(int width, int height) {
@@ -1058,33 +1070,36 @@ private static int getFramePacingValue(Context context) {
         config.smartClipboardSyncToast = prefs.getBoolean(CHECKBOX_SMART_CLIPBOARD_SYNC_TOAST, DEFAULT_SMART_CLIPBOARD_SYNC_TOAST);
         config.hideClipboardContent = prefs.getBoolean(CHECKBOX_HIDE_CLIPBOARD_CONTENT, DEFAULT_HIDE_CLIPBOARD_CONTENT);
         config.stickyModifierKey = prefs.getBoolean(CHECKBOX_ENABLE_STICKY_MODIFIER_KEY_VIRTUAL_KEYBOARD, DEFAULT_ENABLE_STICKY_MODIFIER_KEY_VIRTUAL_KEYBOARD);
-        config.postProcessRendererMode = Integer.parseInt(prefs.getString(POST_PROCESS_RENDERER_PREF_STRING, DEFAULT_POST_PROCESS_RENDERER));
-        config.videoHdrMode = Integer.parseInt(prefs.getString(VIDEO_HDR_MODE_PREF_STRING, DEFAULT_VIDEO_HDR_MODE));
+        config.postProcessRendererMode = getIntPref(prefs, POST_PROCESS_RENDERER_PREF_STRING, DEFAULT_POST_PROCESS_RENDERER);
+        config.videoHdrMode = getIntPref(prefs, VIDEO_HDR_MODE_PREF_STRING, DEFAULT_VIDEO_HDR_MODE);
         if (config.videoHdrMode > VIDEO_HDR_SCRGB) {
             config.videoHdrMode = VIDEO_HDR_SCRGB;
         }
         if (config.videoHdrMode < VIDEO_HDR_OFF) {
             config.videoHdrMode = VIDEO_HDR_OFF;
         }
-        config.videoHdrPaperWhiteNits = Integer.parseInt(prefs.getString(VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS));
+        config.videoHdrPaperWhiteNits = getIntPref(prefs, VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS);
         if (config.videoHdrPaperWhiteNits < 80) {
             config.videoHdrPaperWhiteNits = 80;
         }
-        config.videoHdrExpandGamut = Integer.parseInt(prefs.getString(VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT));
+        config.videoHdrExpandGamut = getIntPref(prefs, VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT);
         if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_EXPANDED) {
             config.videoHdrExpandGamut = HDR_GAMUT_ACCURATE;
         }
         config.videoHdrScanlines = prefs.getBoolean(VIDEO_HDR_SCANLINES_PREF_STRING, DEFAULT_VIDEO_HDR_SCANLINES);
-        config.videoHdrSubpixelLayout = Integer.parseInt(prefs.getString(VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING, DEFAULT_VIDEO_HDR_SUBPIXEL_LAYOUT));
+        config.videoHdrSubpixelLayout = getIntPref(prefs, VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING, DEFAULT_VIDEO_HDR_SUBPIXEL_LAYOUT);
         if (config.videoHdrSubpixelLayout < HDR_SUBPIXEL_RGB || config.videoHdrSubpixelLayout > HDR_SUBPIXEL_BGR) {
             config.videoHdrSubpixelLayout = HDR_SUBPIXEL_RGB;
         }
         config.videoBlackFrameInsertion = prefs.getBoolean(VIDEO_BFI_PREF_STRING, DEFAULT_VIDEO_BFI);
-        config.videoBfiDarkFrames = Integer.parseInt(prefs.getString(VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES));
+        config.videoBfiDarkFrames = getIntPref(prefs, VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES);
         if (config.videoBfiDarkFrames < 1) {
             config.videoBfiDarkFrames = 1;
         }
-        config.videoBfiBrightnessCompensation = prefs.getBoolean(VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING, DEFAULT_VIDEO_BFI_BRIGHTNESS_COMPENSATION);
+        config.videoBfiCompensationMode = getIntPref(prefs, VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING, DEFAULT_VIDEO_BFI_COMPENSATION);
+        if (config.videoBfiCompensationMode < BFI_COMP_OFF || config.videoBfiCompensationMode > BFI_COMP_FULL) {
+            config.videoBfiCompensationMode = BFI_COMP_OFF;
+        }
 
         config.enableAudioFx = prefs.getBoolean(ENABLE_AUDIO_FX_PREF_STRING, DEFAULT_ENABLE_AUDIO_FX);
         config.reduceRefreshRate = prefs.getBoolean(REDUCE_REFRESH_RATE_PREF_STRING, DEFAULT_REDUCE_REFRESH_RATE);

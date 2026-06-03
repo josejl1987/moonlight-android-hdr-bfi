@@ -764,7 +764,10 @@
     <string name="summary_video_bfi">Insert black display frames after decoding. Requires display refresh to be a clean multiple of the stream frame rate.</string>
     <string name="title_video_bfi_dark_frames">BFI dark frames</string>
     <string name="summary_video_bfi_dark_frames">Number of black refresh intervals inserted between visible frames</string>
-    <string name="title_video_bfi_brightness_compensation">BFI brightness compensation</string>
-    <string name="summary_video_bfi_brightness_compensation">Boost visible frames to compensate for BFI brightness loss.</string>
+    <string name="title_video_bfi_compensation">BFI brightness compensation</string>
+    <string name="summary_video_bfi_compensation">Boost visible frames to compensate for BFI brightness loss.</string>
+    <string name="bfi_comp_off">Off</string>
+    <string name="bfi_comp_conservative">Conservative</string>
+    <string name="bfi_comp_full">Full</string>
     <string name="game_menu_postprocess_quick_setup">Post-process quick setup</string>
 </resources>

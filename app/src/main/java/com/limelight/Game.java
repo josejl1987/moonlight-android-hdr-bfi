@@ -4099,10 +4099,12 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 new int[]{1, 2, 3},
                 prefConfig.videoBfiDarkFrames);
 
-        final CheckBox compCheck = new CheckBox(this);
-        compCheck.setText("BFI brightness compensation");
-        compCheck.setChecked(prefConfig.videoBfiBrightnessCompensation);
-        root.addView(compCheck);
+        final Spinner compSpinner = createSpinner(root,
+                "BFI compensation",
+                new String[]{"Off", "Conservative", "Full"},
+                new int[]{0, 1, 2},
+                prefConfig.videoBfiCompensationMode);
+        root.addView(compSpinner);
 
         updatePaperWhiteLabel(paperWhiteLabel, paperWhiteValues[paperWhiteSeek.getProgress()]);
 
@@ -4131,7 +4133,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     prefConfig.videoHdrPaperWhiteNits = paperWhiteValues[paperWhiteSeek.getProgress()];
                     prefConfig.videoBlackFrameInsertion = bfiCheck.isChecked();
                     prefConfig.videoBfiDarkFrames = spinnerValue(darkFrameSpinner);
-                    prefConfig.videoBfiBrightnessCompensation = compCheck.isChecked();
+                    prefConfig.videoBfiCompensationMode = spinnerValue(compSpinner);
                     persistAndApplyPostProcessSettings();
                 })
                 .setNeutralButton("Cancel", null)
@@ -4201,7 +4203,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         editor.putString("list_video_hdr_paper_white_nits", Integer.toString(prefConfig.videoHdrPaperWhiteNits));
         editor.putBoolean("checkbox_video_bfi", prefConfig.videoBlackFrameInsertion);
         editor.putString("list_video_bfi_dark_frames", Integer.toString(prefConfig.videoBfiDarkFrames));
-        editor.putBoolean("checkbox_video_bfi_brightness_compensation", prefConfig.videoBfiBrightnessCompensation);
+        editor.putString("list_video_bfi_compensation", Integer.toString(prefConfig.videoBfiCompensationMode));
         editor.apply();
 
         if (postProcessRenderer != null) {

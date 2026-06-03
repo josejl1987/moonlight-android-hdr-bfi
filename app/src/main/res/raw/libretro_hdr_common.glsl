@@ -1,139 +1,167 @@
 // SPDX-License-Identifier: MIT
 //
 // Ported from RetroArch's gfx/drivers/vulkan_shaders/hdr_common.glsl
-// (c) Libretro contributors. This file defines the shared math used by
-// libretro_hdr_composite.frag. The Vulkan source materializes the UBO at
-// the top of the file; on Android GLES 2.0 we have no native UBO support,
-// so the composite shader declares the libretro uniforms individually
-// (same names: MVP, SourceSize, OutputSize, BrightnessNits, SubpixelLayout,
-// Scanlines, ExpandGamut, InverseTonemap, HDR10, HDRMode) and this file
-// just brings in the helpers and matrices.
+// (c) Libretro contributors.
 //
-// Artemis-specific adapter: the composite shader samples a
-// samplerExternalOES instead of a sampler2D, so the libretro SampleSource()
-// shim lives in the composite file, not here. Everything downstream of
-// the shim is the libretro composite math.
+// This is a direct GLES 2.0 port of the Vulkan UBO and helper math.
+// The only adaptations are:
+//   1. The Vulkan UBO block becomes individual uniforms (GLES 2.0 has no UBO).
+//   2. uint types become int (GLES 2.0 has no uint).
+//   3. texture(Source, ...) becomes texture2D(Source, ...) after the OES adapter pass.
 
-#ifndef LIBRETRO_HDR_COMMON_GLSL
-#define LIBRETRO_HDR_COMMON_GLSL
+// libretro HDR uniform block (Vulkan UBO). On Android GLES 2.0 we declare
+// each member individually. The names match the libretro spec exactly.
+uniform mat4  MVP;
+uniform vec4  SourceSize;
+uniform vec4  OutputSize;
+uniform float BrightnessNits;
+uniform int   SubpixelLayout;
+uniform float Scanlines;
+uniform int   ExpandGamut;
+uniform float InverseTonemap;
+uniform float HDR10;
+uniform int   HDRMode;
 
-// HDRMode enum values. GLES 2.0 has no native uint, so these are #defines
-// for plain ints. They match RetroArch's config.def.h and
-// hdr.frag branch conditions.
-#define HDR_MODE_OFF         0
-#define HDR_MODE_HDR10       1
-#define HDR_MODE_SCRGB       2
-#define HDR_MODE_PQ_TO_SCRGB 3
+/* Tonemapping: conversion from HDR to SDR (and vice-versa) */
+const float kMaxNitsFor2084   = 10000.0;
+const float kscRGBWhiteNits   = 80.0;
+const float kEpsilon          = 0.0001;
 
-// ---------------------------------------------------------------------------
-// Inverse tonemap helpers (shared with hdr_tonemap.frag on the Vulkan side).
-//
-// On the Vulkan target these are usually called as `InverseTonemap()` and
-// `Tonemap()`. On Android GLES 2.0 the libretro uniform `InverseTonemap`
-// lives at global scope, so we have to use distinct function names to avoid
-// a symbol clash. The composite calls `sdrToHdrLinear()` from
-// `libretro_hdr_tonemap.frag` for the same purpose; these helpers stay here
-// for completeness and to match the libretro Vulkan source.
-// ---------------------------------------------------------------------------
-vec3 applyInverseTonemap(vec3 hdr)
+/* Rec BT.709 luma coefficients - https://en.wikipedia.org/wiki/Luma_(video) */
+const vec3 k709LumaCoeff = vec3(0.2126, 0.7152, 0.0722);
+/* Expanded Rec BT.709 luma coefficients - obtained by linear transformation + normalization */
+const vec3 kExpanded709LumaCoeff = vec3(0.215796, 0.702694, 0.120968);
+
+vec3 InverseTonemap(const vec3 sdr_linear, const float max_nits, const float paper_white_nits)
 {
-   // Generic max-clamp with paper-white slope. Mirrors the
-   // CalcHDRSceneValue() in RetroArch's hdr_tonemap.frag: a soft-knee expand
-   // of linear light that targets the configured paper-white nits.
-   float peak = max(max(hdr.r, hdr.g), hdr.b);
-   if (peak <= 0.0)
-      return vec3(0.0);
-   vec3 normalized = hdr / peak;
-   // Reinhard-like shoulder, scaled by BrightnessNits.
-   float mapped   = peak / (1.0 + peak);
-   return normalized * (mapped * BrightnessNits * (1.0 / 80.0));
+   float input_val = max(sdr_linear.r, max(sdr_linear.g, sdr_linear.b));
+
+   if (input_val < kEpsilon) return sdr_linear;
+
+   float peak_ratio = max_nits / paper_white_nits;
+
+   float numerator = input_val;
+   float denominator = 1.0 - input_val * (1.0 - (1.0 / peak_ratio));
+   float tonemapped_val = numerator / max(denominator, kEpsilon);
+
+   return sdr_linear * (tonemapped_val / input_val);
 }
 
-vec3 applyTonemap(vec3 hdr)
+vec3 Tonemap(const vec3 hdr_linear, const float max_nits, const float paper_white_nits)
 {
-   float peak = max(max(hdr.r, hdr.g), hdr.b);
-   if (peak <= 0.0)
-      return vec3(0.0);
-   vec3 normalized = hdr / peak;
-   float inverse   = peak / max(1.0 - peak, 1e-4);
-   return normalized * (inverse * (1.0 / BrightnessNits) * 80.0);
+    float input_val = max(hdr_linear.r, max(hdr_linear.g, hdr_linear.b));
+
+    if (input_val < kEpsilon) return hdr_linear;
+
+    float peak_ratio = max_nits / paper_white_nits;
+
+    float k = 1.0 - (1.0 / peak_ratio);
+
+    return hdr_linear / (1.0 + input_val * k);
 }
 
-// ---------------------------------------------------------------------------
-// Color space matrices. Constant across all libretro HDR pipelines; not
-// adjusted by Artemis because the libretro math is the spec.
-// ---------------------------------------------------------------------------
-const mat3 k709to2020            = mat3(0.6274, 0.0691, 0.0164,
-                                        0.3293, 0.9195, 0.0880,
-                                        0.0433, 0.0114, 0.8956);
-const mat3 k2020to709            = mat3( 1.6605, -0.1246, -0.0182,
-                                        -0.5876,  1.1329, -0.1006,
-                                        -0.0728, -0.0083,  1.1187);
-const mat3 kP3to2020             = mat3( 0.7538,  0.0458, -0.0012,
-                                        0.1986,  0.9521,  0.0140,
-                                        0.0476,  0.0021,  0.9872);
-const mat3 k2020toP3             = mat3( 1.3436, -0.0652,  0.0028,
-                                        -0.2822,  1.0516, -0.0167,
-                                        -0.0613,  0.0136,  1.0139);
-const mat3 k709toP3              = mat3( 0.8225,  0.0332, -0.0171,
-                                        0.1775,  0.9668,  0.0171,
-                                        0.0000,  0.0000,  1.0000);
-const mat3 kExpanded709to2020    = mat3( 0.8900,  0.0900,  0.0200,
-                                        0.1100,  0.9100,  0.1000,
-                                        0.0000,  0.0000,  0.8800);
-const mat3 k2020toExpanded709    = mat3( 1.1450, -0.1100, -0.0200,
-                                        -0.1450,  1.1100, -0.1100,
-                                        0.0000,  0.0000,  1.1500);
-const mat3 k709toExpanded709     = mat3( 1.0000,  0.0000,  0.0000,
-                                        0.0000,  1.0000,  0.0000,
-                                        0.0000,  0.0000,  1.0000);
+/* Colorspace conversions */
 
-// ---------------------------------------------------------------------------
-// ST2084 / PQ encode and decode. Matches the constants used in RetroArch's
-// Vulkan HDR pass.
-// ---------------------------------------------------------------------------
-const float ST2084_M1 = 0.1593017578125;
-const float ST2084_M2 = 78.84375;
-const float ST2084_C1 = 0.8359375;
-const float ST2084_C2 = 18.8515625;
-const float ST2084_C3 = 18.6875;
+/* Color rotation matrix to rotate Rec.709 color primaries into Rec.2020 */
+const mat3 k709to2020 = mat3 (
+   0.6274040, 0.3292820, 0.0433136,
+   0.0690970, 0.9195400, 0.0113612,
+   0.0163916, 0.0880132, 0.8955950);
 
-vec3 LinearToST2084(vec3 linear)
+/* Color rotation matrix to rotate Rec.2020 color primaries into Rec.709 */
+const mat3 k2020to709 = mat3 (
+   1.6604910, -0.5876411, -0.0728499,
+   -0.1245505, 1.1328999, -0.0083494,
+   -0.0181508, -0.1005789, 1.1187297);
+
+/* Color rotation matrix to rotate DCI-P3 color primaries into Rec.2020 */
+const mat3 kP3to2020 = mat3 (
+    0.753833,  0.198597,  0.047570,
+    0.045744,  0.941777,  0.012479,
+   -0.001210,  0.017602,  0.983609);
+
+/* Color rotation matrix to rotate Rec.2020 color primaries into DCI-P3 */
+const mat3 k2020toP3 = mat3 (
+    1.343578, -0.282180, -0.061399,
+   -0.065297,  1.075788, -0.010490,
+    0.002822, -0.019598,  1.016777);
+
+/* Color rotation matrix to rotate Rec.709 color primaries into DCI-P3 (= k709to2020 * k2020toP3) */
+const mat3 k709toP3 = mat3 (
+    0.8215873,  0.1763479,  0.0020641,
+    0.0328261,  0.9695096, -0.0023367,
+    0.0188038,  0.0725063,  0.9086907);
+
+/* START Converted from (Copyright (c) Microsoft Corporation - Licensed under the MIT License.)  https://github.com/microsoft/Xbox-ATG-Samples/tree/master/Kits/ATGTK/HDR */
+/* Rotation matrix describing a custom color space which is bigger than Rec.709, but a little smaller than P3-D65.
+ * This enhances colors, especially in the SDR range, by being a little more saturated. This can be used instead
+ * of from709to2020.
+ */
+const mat3 kExpanded709to2020 = mat3 (
+    0.6274040,  0.3292820, 0.0433136,
+    0.0457456,  0.941777,  0.0124772,
+   -0.00121055, 0.0176041, 0.983607);
+
+/* Rotation matrix from Rec. 2020 color primaries into the custom expanded Rec.709 colorspace described above. */
+const mat3 k2020toExpanded709 = mat3 (
+    1.63535,    -0.57057, -0.0647755,
+   -0.0794803,   1.0898,  -0.0103244,
+    0.00343516, -0.020207, 1.01677);
+
+/* Color rotation matrix to rotate Rec.709 color primaries into the expanded Rec.709 colorspace (= k709to2020 * k2020toExpanded709) */
+const mat3 k709toExpanded709 = mat3 (
+    1.0000025, -0.0000016, -0.0000001,
+    0.0399515,  0.9624604, -0.0024178,
+    0.0228872,  0.0684669,  0.9086437);
+
+vec3 LinearToST2084(vec3 normalizedLinearValue)
 {
-   vec3 L   = max(linear * (1.0 / 10000.0), vec3(0.0));
-   vec3 Lm  = pow(L, vec3(ST2084_M1));
-   vec3 N   = (ST2084_C1 + ST2084_C2 * Lm) / (1.0 + ST2084_C3 * Lm);
-   return pow(N, vec3(ST2084_M2));
+   vec3 ST2084 = pow((0.8359375 + 18.8515625 * pow(abs(normalizedLinearValue), vec3(0.1593017578))) / (1.0 + 18.6875 * pow(abs(normalizedLinearValue), vec3(0.1593017578))), vec3(78.84375));
+   return ST2084;  /* Don't clamp between [0..1], so we can still perform operations on scene values higher than 10,000 nits */
 }
 
-vec3 ST2084ToLinear(vec3 pq)
+vec3 ST2084ToLinear(vec3 ST2084)
 {
-   vec3 N  = pow(max(pq, vec3(0.0)), vec3(1.0 / ST2084_M2));
-   vec3 Lm = max((N - ST2084_C1) / (ST2084_C2 - ST2084_C3 * N), vec3(0.0));
-   return pow(Lm, vec3(1.0 / ST2084_M1)) * 10000.0;
+   vec3 normalizedLinear = pow(abs(max(pow(abs(ST2084), vec3(1.0 / 78.84375)) - 0.8359375, 0.0) / (18.8515625 - 18.6875 * pow(abs(ST2084), vec3(1.0 / 78.84375)))), vec3(1.0 / 0.1593017578));
+   return normalizedLinear;
+}
+/* END Converted from (Copyright (c) Microsoft Corporation - Licensed under the MIT License.)  https://github.com/microsoft/Xbox-ATG-Samples/tree/master/Kits/ATGTK/HDR */
+
+/* Per spec, the max nits for ST.2084 is 10,000 nits. We need to establish what the value of 1.0 means
+ * by normalizing the values using the defined nits for paper white. According to SDR specs, paper white
+ * is 80 nits, but that is paper white in a cinema with a dark environment, and is perceived as grey on
+ * a display in office and living room environments. This value should be tuned according to the nits
+ * that the consumer perceives as white in his living room, e.g. 200 nits. As reference, PC monitors is
+ * normally in the range 200-300 nits, SDR TVs 150-250 nits.
+ */
+
+/*  Calc the value that the HDR scene has to use to output a certain brightness */
+vec3 CalcHDRSceneValue(vec3 nits)
+{
+    return nits * kMaxNitsFor2084 / BrightnessNits;
 }
 
-vec3 CalcHDRSceneValue(vec3 sdr)
+/* Converts a non-linear HDR10 value in the BT. 2020 colorspace to a linear HDR value in the Rec. 709 colorspace */
+vec3 HDR10ToLinear(vec3 hdr10)
 {
-   // Same intent as RetroArch's CalcHDRSceneValue: a soft shoulder that turns
-   // [0, 1] SDR into HDR linear light, modulated by BrightnessNits.
-   vec3 x = max(sdr, vec3(0.0));
-   vec3 a = x * (1.0 + 0.5 * x / (BrightnessNits * (1.0 / 80.0)));
-   return a;
+   vec3 normalizedLinear = ST2084ToLinear(hdr10);
+   vec3 rec2020 = CalcHDRSceneValue(normalizedLinear);
+
+   vec3 hdr = rec2020 * k2020to709;
+   if (ExpandGamut == 1)
+   {
+      hdr   = rec2020 * k2020toExpanded709;
+   }
+
+   return hdr;
 }
 
-// HDR10 helpers used by the HDRMode 1 (HDR10) and 3 (PQ -> scRGB) paths.
-vec3 HDR10ToLinear(vec3 pq)
+/* Converts a non-linear HDR10 PQ value in the BT. 2020 colorspace to scRGB linear.
+ * scRGB uses Rec.709 primaries with 1.0 = 80 nits.
+ * HDR10 PQ: 1.0 normalised linear = 10,000 nits, so scalar = 10000/80 = 125. */
+vec3 HDR10ToscRGB(vec3 hdr10Color)
 {
-   return ST2084ToLinear(pq);
+   vec3 linear10k = ST2084ToLinear(hdr10Color);
+   vec3 linear709 = linear10k * k2020to709;
+   return linear709 * (kMaxNitsFor2084 / kscRGBWhiteNits);
 }
-
-vec3 HDR10ToscRGB(vec3 pq)
-{
-   // scRGB is linear light scaled to nits / 80. scRGB frames store values
-   // > 1.0 to mean > 80 nits, capped at 10000 nits.
-   vec3 lin = ST2084ToLinear(pq);
-   return lin * (1.0 / 80.0);
-}
-
-#endif

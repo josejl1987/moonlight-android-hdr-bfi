@@ -284,11 +284,13 @@
             android:summary="@string/summary_video_bfi_dark_frames"
             android:title="@string/title_video_bfi_dark_frames"
             app:iconSpaceReserved="false" />
-        <CheckBoxPreference
-            android:defaultValue="false"
-            android:key="checkbox_video_bfi_brightness_compensation"
-            android:summary="@string/summary_video_bfi_brightness_compensation"
-            android:title="@string/title_video_bfi_brightness_compensation"
+        <ListPreference
+            android:defaultValue="0"
+            android:entries="@array/video_bfi_compensation_names"
+            android:entryValues="@array/video_bfi_compensation_values"
+            android:key="list_video_bfi_compensation"
+            android:summary="@string/summary_video_bfi_compensation"
+            android:title="@string/title_video_bfi_compensation"
             app:iconSpaceReserved="false" />
     </PreferenceCategory>
 
