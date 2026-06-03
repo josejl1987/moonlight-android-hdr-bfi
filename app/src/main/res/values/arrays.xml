@@ -212,21 +212,55 @@
         <item>2</item>
     </string-array>
 
-    <!-- Client HDR modes -->
-    <string-array name="client_hdr_mode_names">
-        <item>@string/client_hdr_off</item>
-        <item>@string/client_hdr_auto</item>
-        <item>@string/client_hdr_scrgb</item>
-        <item>@string/client_hdr_hdr10</item>
+    <!-- libretro video_hdr_mode enum (mirrors config.def.h). -->
+    <string-array name="video_hdr_mode_names">
+        <item>@string/video_hdr_off</item>
+        <item>@string/video_hdr_hdr10</item>
+        <item>@string/video_hdr_scrgb</item>
     </string-array>
-    <string-array name="client_hdr_mode_values" translatable="false">
+    <string-array name="video_hdr_mode_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </string-array>
+
+    <!-- video_hdr_expand_gamut enum. -->
+    <string-array name="video_hdr_expand_gamut_names">
+        <item>@string/video_hdr_gamut_accurate</item>
+        <item>@string/video_hdr_gamut_bt2020</item>
+        <item>@string/video_hdr_gamut_p3</item>
+        <item>@string/video_hdr_gamut_expanded</item>
+    </string-array>
+    <string-array name="video_hdr_expand_gamut_values" translatable="false">
         <item>0</item>
         <item>1</item>
         <item>2</item>
         <item>3</item>
     </string-array>
 
-    <!-- Paper white nits -->
+    <!-- Subpixel layout enum. 0 = RGB (default), 1 = BGR. -->
+    <string-array name="video_hdr_subpixel_layout_names">
+        <item>@string/video_hdr_subpixel_rgb</item>
+        <item>@string/video_hdr_subpixel_bgr</item>
+    </string-array>
+    <string-array name="video_hdr_subpixel_layout_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+    </string-array>
+
+    <!-- BFI dark frame count: 1 = 2-refresh cycle, 2 = 3-refresh, etc. -->
+    <string-array name="video_bfi_dark_frames_names">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+    <string-array name="video_bfi_dark_frames_values" translatable="false">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
+    <!-- Paper white nits (RetroArch default is 200). -->
     <string-array name="paper_white_nits_names">
         <item>@string/paper_white_150</item>
         <item>@string/paper_white_200</item>
@@ -238,46 +272,6 @@
         <item>200</item>
         <item>250</item>
         <item>300</item>
-    </string-array>
-
-    <!-- Peak nits -->
-    <string-array name="peak_nits_names">
-        <item>@string/peak_400</item>
-        <item>@string/peak_600</item>
-        <item>@string/peak_800</item>
-        <item>@string/peak_1000</item>
-    </string-array>
-    <string-array name="peak_nits_values" translatable="false">
-        <item>400</item>
-        <item>600</item>
-        <item>800</item>
-        <item>1000</item>
-    </string-array>
-
-    <!-- Gamut expansion -->
-    <string-array name="gamut_expansion_names">
-        <item>@string/gamut_accurate</item>
-        <item>@string/gamut_expanded</item>
-        <item>@string/gamut_wide</item>
-        <item>@string/gamut_super</item>
-    </string-array>
-    <string-array name="gamut_expansion_values" translatable="false">
-        <item>0</item>
-        <item>1</item>
-        <item>2</item>
-        <item>3</item>
-    </string-array>
-
-    <!-- BFI compensation modes -->
-    <string-array name="bfi_compensation_names">
-        <item>@string/bfi_comp_off</item>
-        <item>@string/bfi_comp_conservative</item>
-        <item>@string/bfi_comp_full</item>
-    </string-array>
-    <string-array name="bfi_compensation_values" translatable="false">
-        <item>0</item>
-        <item>1</item>
-        <item>2</item>
     </string-array>
 
 </resources>

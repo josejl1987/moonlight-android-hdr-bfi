@@ -28,6 +28,7 @@ import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
+import com.limelight.binding.video.PostProcessStatusListener;
 import com.limelight.binding.video.PostProcessVideoRenderer;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
@@ -64,6 +65,7 @@ import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
@@ -92,6 +94,7 @@ import android.view.InputDevice;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
+import android.view.ViewGroup;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.View;
@@ -104,6 +107,13 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
+import android.widget.ArrayAdapter;
+import android.widget.CheckBox;
+import android.widget.CompoundButton;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ImageButton;
@@ -141,7 +151,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         OnGenericMotionListener, OnTouchListener, NvConnectionListener, EvdevListener,
         OnSystemUiVisibilityChangeListener, GameGestures, StreamContainer.InputCallbacks,
         ExternalControllerView.InputCallbacks,
-        PerfOverlayListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
+        PerfOverlayListener, PostProcessStatusListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
     public static Game instance;
 
     private int lastButtonState = 0;
@@ -225,6 +235,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean overlayToggleZoomButtonShown;
     private TextView notificationOverlayView;
     private int requestedNotificationOverlayVisibility = View.GONE;
+    private TextView postProcessOverlayView;
     private View performanceOverlayView;
 
     private TextView performanceOverlayLite;
@@ -518,6 +529,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         notificationOverlayView = findViewById(R.id.notificationOverlay);
+        postProcessOverlayView = findViewById(R.id.postProcessOverlay);
+        if (postProcessOverlayView != null) {
+            postProcessOverlayView.setOnClickListener(v -> showPostProcessQuickPanel());
+        }
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
 
@@ -889,16 +904,19 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                                 displayRefreshRate,
                                 finalWillStreamHdr,
                                 getWindow(),
-                                finalCurrentDisplay
+                                finalCurrentDisplay,
+                                Game.this
                         );
                         if (postProcessRenderer.startBlocking()) {
                             decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
                             LimeLog.info("Post-process renderer enabled");
+                            showPostProcessOverlay(true);
                         } else {
                             LimeLog.warning("Post-process renderer init failed; falling back to direct surface");
                             postProcessRenderer.release();
                             postProcessRenderer = null;
                             decoderRenderer.setRenderTarget(renderSurface);
+                            showPostProcessOverlay(false);
                         }
                     } catch (Throwable t) {
                         LimeLog.warning("Post-process renderer exception; falling back to direct surface: " + t);
@@ -907,23 +925,26 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                             postProcessRenderer = null;
                         }
                         decoderRenderer.setRenderTarget(renderSurface);
+                        showPostProcessOverlay(false);
                     }
                 } else {
-                    if (prefConfig.clientBfi) {
-                        boolean bfiUseful = Math.abs(displayRefreshRate - prefConfig.fps * 2.0f) <= 3.0f;
+                    if (prefConfig.videoBlackFrameInsertion) {
+                        float required = prefConfig.fps * (1.0f + Math.max(1, prefConfig.videoBfiDarkFrames));
+                        boolean bfiUseful = Math.abs(displayRefreshRate - required) <= 3.0f;
                         if (!bfiUseful) {
                             Toast.makeText(Game.this,
-                                    "BFI requires ~" + (int)(prefConfig.fps * 2) + " Hz display (current: "
+                                    "BFI requires ~" + (int)(required) + " Hz display (current: "
                                             + (int)displayRefreshRate + " Hz)", Toast.LENGTH_LONG).show();
                         }
                     }
-                    if (prefConfig.clientHdrMode != 0 && !finalWillStreamHdr
+                    if (prefConfig.videoHdrMode != 0 && !finalWillStreamHdr
                             && prefConfig.postProcessRendererMode == 0) {
                         Toast.makeText(Game.this,
                                 "Enable Post-process renderer (Auto/Force) to use HDR/ BFI",
                                 Toast.LENGTH_LONG).show();
                     }
                     decoderRenderer.setRenderTarget(renderSurface);
+                    showPostProcessOverlay(false);
                 }
 
                 conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
@@ -1290,6 +1311,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 performanceOverlayView.setVisibility(View.GONE);
                 notificationOverlayView.setVisibility(View.GONE);
+                if (postProcessOverlayView != null) {
+                    postProcessOverlayView.setVisibility(View.GONE);
+                }
 
                 // Disable sensors while in PiP mode
                 controllerHandler.disableSensors();
@@ -1327,6 +1351,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 }
 
                 notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
+                if (postProcessRenderer != null && postProcessOverlayView != null) {
+                    postProcessOverlayView.setVisibility(View.VISIBLE);
+                }
 
                 // Enable sensors again after exiting PiP
                 controllerHandler.enableSensors();
@@ -1793,6 +1820,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (postProcessRenderer != null) {
             postProcessRenderer.release();
             postProcessRenderer = null;
+        }
+        if (postProcessOverlayView != null) {
+            postProcessOverlayView.setVisibility(View.GONE);
+            postProcessOverlayView.setText("");
         }
 
         // Destroy the capture provider
@@ -3502,6 +3533,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (connecting || connected) {
             connecting = connected = false;
             updatePipAutoEnter();
+            showPostProcessOverlay(false);
 
             controllerHandler.stop();
 
@@ -4004,6 +4036,181 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     @Override
+    public void onPostProcessStatusUpdate(final String text) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (postProcessOverlayView != null) {
+                    postProcessOverlayView.setText(text);
+                    postProcessOverlayView.setVisibility(isHidingOverlays ? View.GONE : View.VISIBLE);
+                }
+            }
+        });
+    }
+
+    public void showPostProcessQuickPanel() {
+        if (postProcessRenderer == null) {
+            Toast.makeText(this, "Post-process renderer is not active", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ScrollView scrollView = new ScrollView(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (getResources().getDisplayMetrics().density * 16);
+        root.setPadding(pad, pad, pad, pad);
+        scrollView.addView(root, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView intro = new TextView(this);
+        intro.setText("Adjust the live post-process pipeline while streaming. Paper white is the SDR brightness reference, measured in nits.");
+        intro.setPadding(0, 0, 0, pad);
+        root.addView(intro);
+
+        TextView hint = new TextView(this);
+        hint.setText("BFI dark frames = 1 gives a 2-refresh cycle: visible, black, visible, black.");
+        hint.setPadding(0, 0, 0, pad);
+        root.addView(hint);
+
+        final Spinner hdrModeSpinner = createSpinner(root,
+                "HDR mode",
+                new String[]{"Off", "HDR10 (PQ)", "scRGB (FP16)"},
+                new int[]{0, 1, 2},
+                prefConfig.videoHdrMode);
+
+        final int[] paperWhiteValues = new int[]{150, 200, 250, 300};
+        final TextView paperWhiteLabel = new TextView(this);
+        paperWhiteLabel.setPadding(0, pad / 2, 0, 8);
+        root.addView(paperWhiteLabel);
+
+        final SeekBar paperWhiteSeek = new SeekBar(this);
+        paperWhiteSeek.setMax(paperWhiteValues.length - 1);
+        paperWhiteSeek.setProgress(indexOfValue(paperWhiteValues, prefConfig.videoHdrPaperWhiteNits));
+        root.addView(paperWhiteSeek);
+
+        final CheckBox bfiCheck = new CheckBox(this);
+        bfiCheck.setText("Black frame insertion");
+        bfiCheck.setChecked(prefConfig.videoBlackFrameInsertion);
+        root.addView(bfiCheck);
+
+        final Spinner darkFrameSpinner = createSpinner(root,
+                "BFI dark frames",
+                new String[]{"1", "2", "3"},
+                new int[]{1, 2, 3},
+                prefConfig.videoBfiDarkFrames);
+
+        final CheckBox compCheck = new CheckBox(this);
+        compCheck.setText("BFI brightness compensation");
+        compCheck.setChecked(prefConfig.videoBfiBrightnessCompensation);
+        root.addView(compCheck);
+
+        updatePaperWhiteLabel(paperWhiteLabel, paperWhiteValues[paperWhiteSeek.getProgress()]);
+
+        hdrModeSpinner.setOnItemSelectedListener(new SimpleSpinnerListener());
+        darkFrameSpinner.setOnItemSelectedListener(new SimpleSpinnerListener());
+        paperWhiteSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                updatePaperWhiteLabel(paperWhiteLabel, paperWhiteValues[progress]);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+            }
+        });
+
+        new AlertDialog.Builder(this)
+                .setTitle("Post-process quick setup")
+                .setView(scrollView)
+                .setPositiveButton("Apply", (dialog, which) -> {
+                    prefConfig.videoHdrMode = spinnerValue(hdrModeSpinner);
+                    prefConfig.videoHdrPaperWhiteNits = paperWhiteValues[paperWhiteSeek.getProgress()];
+                    prefConfig.videoBlackFrameInsertion = bfiCheck.isChecked();
+                    prefConfig.videoBfiDarkFrames = spinnerValue(darkFrameSpinner);
+                    prefConfig.videoBfiBrightnessCompensation = compCheck.isChecked();
+                    persistAndApplyPostProcessSettings();
+                })
+                .setNeutralButton("Cancel", null)
+                .show();
+    }
+
+    private void updatePaperWhiteLabel(TextView label, int nits) {
+        label.setText("HDR paper white: " + nits + " nits");
+    }
+
+    private Spinner createSpinner(LinearLayout parent, String label, String[] displayValues, int[] numericValues, int currentValue) {
+        TextView textView = new TextView(this);
+        textView.setText(label);
+        textView.setPadding(0, 0, 0, 8);
+        parent.addView(textView);
+
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, displayValues);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setTag(numericValues);
+
+        int selectedIndex = 0;
+        for (int i = 0; i < numericValues.length; i++) {
+            if (numericValues[i] == currentValue) {
+                selectedIndex = i;
+                break;
+            }
+        }
+        spinner.setSelection(selectedIndex);
+        parent.addView(spinner);
+        return spinner;
+    }
+
+    private int indexOfValue(int[] values, int currentValue) {
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] == currentValue) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    private int spinnerValue(Spinner spinner) {
+        int position = spinner.getSelectedItemPosition();
+        int[] values = (int[]) spinner.getTag();
+        if (values == null || position < 0 || position >= values.length) {
+            return 0;
+        }
+        return values[position];
+    }
+
+    private static final class SimpleSpinnerListener implements android.widget.AdapterView.OnItemSelectedListener {
+
+        @Override
+        public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
+        }
+
+        @Override
+        public void onNothingSelected(android.widget.AdapterView<?> parent) {
+        }
+    }
+
+    private void persistAndApplyPostProcessSettings() {
+        SharedPreferences.Editor editor = PreferenceManager.getDefaultSharedPreferences(this).edit();
+        editor.putString("list_video_hdr_mode", Integer.toString(prefConfig.videoHdrMode));
+        editor.putString("list_video_hdr_paper_white_nits", Integer.toString(prefConfig.videoHdrPaperWhiteNits));
+        editor.putBoolean("checkbox_video_bfi", prefConfig.videoBlackFrameInsertion);
+        editor.putString("list_video_bfi_dark_frames", Integer.toString(prefConfig.videoBfiDarkFrames));
+        editor.putBoolean("checkbox_video_bfi_brightness_compensation", prefConfig.videoBfiBrightnessCompensation);
+        editor.apply();
+
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings(prefConfig);
+            showPostProcessOverlay(true);
+        }
+    }
+
+    @Override
     public void onUsbPermissionPromptStarting() {
         // Disable PiP auto-enter while the USB permission prompt is on-screen. This prevents
         // us from entering PiP while the user is interacting with the OS permission dialog.
@@ -4265,6 +4472,17 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             }
         } else {
             performanceOverlayView.setVisibility(View.GONE);
+        }
+    }
+
+    private void showPostProcessOverlay(boolean visible) {
+        if (postProcessOverlayView == null) {
+            return;
+        }
+
+        postProcessOverlayView.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (!visible) {
+            postProcessOverlayView.setText("");
         }
     }
 

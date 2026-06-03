@@ -112,12 +112,14 @@ public class PreferenceConfiguration {
     private static final String CHECKBOX_ENABLE_STICKY_MODIFIER_KEY_VIRTUAL_KEYBOARD = "checkbox_enable_sticky_modifier_key_virtual_keyboard";
 
     private static final String POST_PROCESS_RENDERER_PREF_STRING = "list_postprocess_renderer";
-    private static final String CLIENT_HDR_MODE_PREF_STRING = "list_client_hdr_mode";
-    private static final String CLIENT_HDR_PAPER_WHITE_NITS_PREF_STRING = "list_client_hdr_paper_white_nits";
-    private static final String CLIENT_HDR_PEAK_NITS_PREF_STRING = "list_client_hdr_peak_nits";
-    private static final String CLIENT_HDR_EXPAND_GAMUT_PREF_STRING = "list_client_hdr_expand_gamut";
-    private static final String CLIENT_BFI_PREF_STRING = "checkbox_client_bfi";
-    private static final String CLIENT_BFI_COMPENSATION_PREF_STRING = "list_client_bfi_compensation";
+    private static final String VIDEO_HDR_MODE_PREF_STRING = "list_video_hdr_mode";
+    private static final String VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING = "list_video_hdr_paper_white_nits";
+    private static final String VIDEO_HDR_EXPAND_GAMUT_PREF_STRING = "list_video_hdr_expand_gamut";
+    private static final String VIDEO_HDR_SCANLINES_PREF_STRING = "checkbox_video_hdr_scanlines";
+    private static final String VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING = "list_video_hdr_subpixel_layout";
+    private static final String VIDEO_BFI_PREF_STRING = "checkbox_video_bfi";
+    private static final String VIDEO_BFI_DARK_FRAMES_PREF_STRING = "list_video_bfi_dark_frames";
+    private static final String VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING = "checkbox_video_bfi_brightness_compensation";
 
     private static final String CHECKBOX_ENABLE_QUIT_DIALOG = "checkbox_enable_quit_dialog";
 
@@ -218,12 +220,14 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_SHOW_OVERLAY_TOGGLE_BUTTON = false;
 
     private static final String DEFAULT_POST_PROCESS_RENDERER = "0";
-    private static final String DEFAULT_CLIENT_HDR_MODE = "0";
-    private static final String DEFAULT_CLIENT_HDR_PAPER_WHITE_NITS = "200";
-    private static final String DEFAULT_CLIENT_HDR_PEAK_NITS = "600";
-    private static final String DEFAULT_CLIENT_HDR_EXPAND_GAMUT = "0";
-    private static final boolean DEFAULT_CLIENT_BFI = false;
-    private static final String DEFAULT_CLIENT_BFI_COMPENSATION = "0";
+    private static final String DEFAULT_VIDEO_HDR_MODE = "0";
+    private static final String DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS = "200";
+    private static final String DEFAULT_VIDEO_HDR_EXPAND_GAMUT = "0";
+    private static final boolean DEFAULT_VIDEO_HDR_SCANLINES = false;
+    private static final String DEFAULT_VIDEO_HDR_SUBPIXEL_LAYOUT = "0";
+    private static final boolean DEFAULT_VIDEO_BFI = false;
+    private static final String DEFAULT_VIDEO_BFI_DARK_FRAMES = "1";
+    private static final boolean DEFAULT_VIDEO_BFI_BRIGHTNESS_COMPENSATION = false;
 
     private static final boolean DEFAULT_REMEMBER_ZOOM_PAN = false;
     private static final float DEFAULT_ZOOM_SCALE = 1.0f;
@@ -234,19 +238,17 @@ public class PreferenceConfiguration {
     public static final int POST_PROCESS_AUTO = 1;
     public static final int POST_PROCESS_FORCE = 2;
 
-    public static final int CLIENT_HDR_OFF = 0;
-    public static final int CLIENT_HDR_AUTO = 1;
-    public static final int CLIENT_HDR_SCRGB = 2;
-    public static final int CLIENT_HDR_HDR10 = 3;
+    public static final int VIDEO_HDR_OFF = 0;
+    public static final int VIDEO_HDR_HDR10 = 1;
+    public static final int VIDEO_HDR_SCRGB = 2;
 
     public static final int HDR_GAMUT_ACCURATE = 0;
-    public static final int HDR_GAMUT_EXPANDED = 1;
-    public static final int HDR_GAMUT_WIDE = 2;
-    public static final int HDR_GAMUT_SUPER = 3;
+    public static final int HDR_GAMUT_BT2020 = 1;
+    public static final int HDR_GAMUT_P3 = 2;
+    public static final int HDR_GAMUT_EXPANDED = 3;
 
-    public static final int BFI_COMP_OFF = 0;
-    public static final int BFI_COMP_CONSERVATIVE = 1;
-    public static final int BFI_COMP_FULL = 2;
+    public static final int HDR_SUBPIXEL_RGB = 0;
+    public static final int HDR_SUBPIXEL_BGR = 1;
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -300,12 +302,14 @@ public class PreferenceConfiguration {
     public boolean enablePip;
 
     public int postProcessRendererMode;
-    public int clientHdrMode;
-    public int clientHdrPaperWhiteNits;
-    public int clientHdrPeakNits;
-    public int clientHdrExpandGamut;
-    public boolean clientBfi;
-    public int clientBfiCompensationMode;
+    public int videoHdrMode;
+    public int videoHdrPaperWhiteNits;
+    public int videoHdrExpandGamut;
+    public boolean videoHdrScanlines;
+    public int videoHdrSubpixelLayout;
+    public boolean videoBlackFrameInsertion;
+    public int videoBfiDarkFrames;
+    public boolean videoBfiBrightnessCompensation;
 
     public float parallax_depth;
 
@@ -1055,12 +1059,32 @@ private static int getFramePacingValue(Context context) {
         config.hideClipboardContent = prefs.getBoolean(CHECKBOX_HIDE_CLIPBOARD_CONTENT, DEFAULT_HIDE_CLIPBOARD_CONTENT);
         config.stickyModifierKey = prefs.getBoolean(CHECKBOX_ENABLE_STICKY_MODIFIER_KEY_VIRTUAL_KEYBOARD, DEFAULT_ENABLE_STICKY_MODIFIER_KEY_VIRTUAL_KEYBOARD);
         config.postProcessRendererMode = Integer.parseInt(prefs.getString(POST_PROCESS_RENDERER_PREF_STRING, DEFAULT_POST_PROCESS_RENDERER));
-        config.clientHdrMode = Integer.parseInt(prefs.getString(CLIENT_HDR_MODE_PREF_STRING, DEFAULT_CLIENT_HDR_MODE));
-        config.clientHdrPaperWhiteNits = Integer.parseInt(prefs.getString(CLIENT_HDR_PAPER_WHITE_NITS_PREF_STRING, DEFAULT_CLIENT_HDR_PAPER_WHITE_NITS));
-        config.clientHdrPeakNits = Integer.parseInt(prefs.getString(CLIENT_HDR_PEAK_NITS_PREF_STRING, DEFAULT_CLIENT_HDR_PEAK_NITS));
-        config.clientHdrExpandGamut = Integer.parseInt(prefs.getString(CLIENT_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_CLIENT_HDR_EXPAND_GAMUT));
-        config.clientBfi = prefs.getBoolean(CLIENT_BFI_PREF_STRING, DEFAULT_CLIENT_BFI);
-        config.clientBfiCompensationMode = Integer.parseInt(prefs.getString(CLIENT_BFI_COMPENSATION_PREF_STRING, DEFAULT_CLIENT_BFI_COMPENSATION));
+        config.videoHdrMode = Integer.parseInt(prefs.getString(VIDEO_HDR_MODE_PREF_STRING, DEFAULT_VIDEO_HDR_MODE));
+        if (config.videoHdrMode > VIDEO_HDR_SCRGB) {
+            config.videoHdrMode = VIDEO_HDR_SCRGB;
+        }
+        if (config.videoHdrMode < VIDEO_HDR_OFF) {
+            config.videoHdrMode = VIDEO_HDR_OFF;
+        }
+        config.videoHdrPaperWhiteNits = Integer.parseInt(prefs.getString(VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS));
+        if (config.videoHdrPaperWhiteNits < 80) {
+            config.videoHdrPaperWhiteNits = 80;
+        }
+        config.videoHdrExpandGamut = Integer.parseInt(prefs.getString(VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT));
+        if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_EXPANDED) {
+            config.videoHdrExpandGamut = HDR_GAMUT_ACCURATE;
+        }
+        config.videoHdrScanlines = prefs.getBoolean(VIDEO_HDR_SCANLINES_PREF_STRING, DEFAULT_VIDEO_HDR_SCANLINES);
+        config.videoHdrSubpixelLayout = Integer.parseInt(prefs.getString(VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING, DEFAULT_VIDEO_HDR_SUBPIXEL_LAYOUT));
+        if (config.videoHdrSubpixelLayout < HDR_SUBPIXEL_RGB || config.videoHdrSubpixelLayout > HDR_SUBPIXEL_BGR) {
+            config.videoHdrSubpixelLayout = HDR_SUBPIXEL_RGB;
+        }
+        config.videoBlackFrameInsertion = prefs.getBoolean(VIDEO_BFI_PREF_STRING, DEFAULT_VIDEO_BFI);
+        config.videoBfiDarkFrames = Integer.parseInt(prefs.getString(VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES));
+        if (config.videoBfiDarkFrames < 1) {
+            config.videoBfiDarkFrames = 1;
+        }
+        config.videoBfiBrightnessCompensation = prefs.getBoolean(VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING, DEFAULT_VIDEO_BFI_BRIGHTNESS_COMPENSATION);
 
         config.enableAudioFx = prefs.getBoolean(ENABLE_AUDIO_FX_PREF_STRING, DEFAULT_ENABLE_AUDIO_FX);
         config.reduceRefreshRate = prefs.getBoolean(REDUCE_REFRESH_RATE_PREF_STRING, DEFAULT_REDUCE_REFRESH_RATE);

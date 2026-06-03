@@ -1015,13 +1015,15 @@ public class StreamSettings extends AppCompatActivity {
             // default is "0" (OFF), so children are always enabled regardless of
             // whether the renderer is actually active. Manually wire it up.
             ListPreference ppPref  = (ListPreference) findPreference("list_postprocess_renderer");
-            ListPreference hdrPref = (ListPreference) findPreference("list_client_hdr_mode");
-            CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference("checkbox_client_bfi");
+            ListPreference hdrPref = (ListPreference) findPreference("list_video_hdr_mode");
+            CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference("checkbox_video_bfi");
 
-            ListPreference ppWhitePref = (ListPreference) findPreference("list_client_hdr_paper_white_nits");
-            ListPreference ppPeakPref  = (ListPreference) findPreference("list_client_hdr_peak_nits");
-            ListPreference ppGamutPref = (ListPreference) findPreference("list_client_hdr_expand_gamut");
-            ListPreference bfiCompPref = (ListPreference) findPreference("list_client_bfi_compensation");
+            ListPreference ppWhitePref = (ListPreference) findPreference("list_video_hdr_paper_white_nits");
+            ListPreference ppGamutPref = (ListPreference) findPreference("list_video_hdr_expand_gamut");
+            CheckBoxPreference scanlinesPref = (CheckBoxPreference) findPreference("checkbox_video_hdr_scanlines");
+            ListPreference subpixelPref = (ListPreference) findPreference("list_video_hdr_subpixel_layout");
+            ListPreference bfiDarkFramesPref = (ListPreference) findPreference("list_video_bfi_dark_frames");
+            CheckBoxPreference bfiCompPref = (CheckBoxPreference) findPreference("checkbox_video_bfi_brightness_compensation");
 
             if (ppPref != null && hdrPref != null && bfiPref != null) {
 
@@ -1036,8 +1038,10 @@ public class StreamSettings extends AppCompatActivity {
                     }
                     boolean hdrOn = on && hdrPref.getValue() != null && !"0".equals(hdrPref.getValue());
                     if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
-                    if (ppPeakPref  != null) ppPeakPref.setEnabled(hdrOn);
                     if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
+                    if (scanlinesPref != null) scanlinesPref.setEnabled(hdrOn);
+                    if (subpixelPref != null) subpixelPref.setEnabled(hdrOn);
+                    if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(on && bfiPref.isChecked());
                     if (bfiCompPref != null) bfiCompPref.setEnabled(on && bfiPref.isChecked());
                     return true;
                 });
@@ -1046,14 +1050,16 @@ public class StreamSettings extends AppCompatActivity {
                     Log.i("StreamSettings", "hdr mode changed to " + newVal);
                     boolean on = !"0".equals(newVal);
                     if (ppWhitePref != null) ppWhitePref.setEnabled(on);
-                    if (ppPeakPref  != null) ppPeakPref.setEnabled(on);
                     if (ppGamutPref != null) ppGamutPref.setEnabled(on);
+                    if (scanlinesPref != null) scanlinesPref.setEnabled(on);
+                    if (subpixelPref != null) subpixelPref.setEnabled(on);
                     return true;
                 });
 
                 bfiPref.setOnPreferenceChangeListener((pref, newVal) -> {
                     Log.i("StreamSettings", "bfi changed to " + newVal);
                     boolean checked = (Boolean) newVal;
+                    if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(checked);
                     if (bfiCompPref != null) bfiCompPref.setEnabled(checked);
                     return true;
                 });
@@ -1067,8 +1073,10 @@ public class StreamSettings extends AppCompatActivity {
                 String curHdr = hdrPref.getValue();
                 boolean hdrOn = ppOn && curHdr != null && !"0".equals(curHdr);
                 if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
-                if (ppPeakPref  != null) ppPeakPref.setEnabled(hdrOn);
                 if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
+                if (scanlinesPref != null) scanlinesPref.setEnabled(hdrOn);
+                if (subpixelPref != null) subpixelPref.setEnabled(hdrOn);
+                if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(ppOn && bfiPref.isChecked());
                 if (bfiCompPref != null) bfiCompPref.setEnabled(ppOn && bfiPref.isChecked());
             }
         }
