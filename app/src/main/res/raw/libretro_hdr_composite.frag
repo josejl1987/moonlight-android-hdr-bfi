@@ -1,19 +1,18 @@
+#version 300 es
 // SPDX-License-Identifier: MIT
 //
 // Ported from RetroArch's gfx/drivers/vulkan_shaders/hdr.frag
 // (c) Libretro contributors.
 //
-// This is a direct GLES 2.0 port of the Vulkan composite shader.
-// The only adaptations are:
+// GLES 3.0 adaptation:
 //   1. The Vulkan UBO block becomes individual uniforms.
-//   2. uint types become int (GLES 2.0 has no uint).
-//   3. texture(Source, ...) becomes texture2D(Source, ...) for OES video.
-//   4. gl_FragColor is used instead of out vec4 FragColor.
-//   5. varying is used instead of in/out.
+//   2. in/out instead of varying.
+//   3. texture() instead of texture().
 
 precision highp float;
 
-varying vec2 vTexCoord;
+in vec2 vTexCoord;
+out vec4 FragColor;
 
 uniform sampler2D Source;
 
@@ -102,14 +101,14 @@ const mat4 kCubicBezier = mat4(
 
 vec3 Sample(vec2 texcoord)
 {
-   vec4 sdr = texture2D(Source, texcoord);
+   vec4 sdr = texture(Source, texcoord);
    vec3 sdr_linear = pow(abs(sdr.rgb), vec3(2.4));
    return sdr_linear;
 }
 
 vec4 Sample(vec4 colour, vec2 texcoord)
 {
-   vec4 sdr = colour * texture2D(Source, texcoord);
+   vec4 sdr = colour * texture(Source, texcoord);
    vec3 sdr_linear = pow(abs(sdr.rgb), vec3(2.4));
    return vec4(sdr_linear, sdr.a);
 }
@@ -394,8 +393,8 @@ void main()
       /* PQ HDR10 to scRGB conversion.
        * Source is PQ-encoded Rec.2020 from the shader's output.
        * Decode PQ to linear, convert gamut to Rec.709, scale for scRGB. */
-      vec4 pq = texture2D(Source, vTexCoord);
-      gl_FragColor = vec4(HDR10ToscRGB(pq.rgb), pq.a);
+      vec4 pq = texture(Source, vTexCoord);
+      FragColor = vec4(HDR10ToscRGB(pq.rgb), pq.a);
    }
    else if(HDRMode == 2)
    {
@@ -409,7 +408,7 @@ void main()
           * scRGB units: 1.0 = 80 nits. */
          vec3 linear = Scanlines(vTexCoord);
 
-         gl_FragColor = vec4(linear * (BrightnessNits / kscRGBWhiteNits), 1.0);
+         FragColor = vec4(linear * (BrightnessNits / kscRGBWhiteNits), 1.0);
       }
       else
       {
@@ -422,7 +421,7 @@ void main()
          linear.rgb = linear.rgb * k2020to709;
 
          linear.rgb *= BrightnessNits / kscRGBWhiteNits;
-         gl_FragColor = linear;
+         FragColor = linear;
       }
    }
    else if((InverseTonemap > 0.0) && (HDR10 > 0.0))
@@ -430,23 +429,23 @@ void main()
       if((Scanlines > 0.0) && (OutputSize.y > 240.0 * 4.0))
       {
          /* Scanlines() returns linear Rec.2020 with InverseTonemap and mask applied */
-         gl_FragColor = vec4(HDR10(Scanlines(vTexCoord)), 1.0);
+         FragColor = vec4(HDR10(Scanlines(vTexCoord)), 1.0);
       }
       else
       {
-         gl_FragColor = HDR10(HDR(To2020(Sample(kDefaultColor, vTexCoord))));
+         FragColor = HDR10(HDR(To2020(Sample(kDefaultColor, vTexCoord))));
       }
    }
    else if(InverseTonemap > 0.0)
    {
-      gl_FragColor = HDR(To2020(Sample(kDefaultColor, vTexCoord)));
+      FragColor = HDR(To2020(Sample(kDefaultColor, vTexCoord)));
    }
    else if(HDR10 > 0.0)
    {
-      gl_FragColor = HDR10(To2020(Sample(kDefaultColor, vTexCoord)));
+      FragColor = HDR10(To2020(Sample(kDefaultColor, vTexCoord)));
    }
    else
    {
-      gl_FragColor = texture2D(Source, vTexCoord);
+      FragColor = texture(Source, vTexCoord);
    }
 }

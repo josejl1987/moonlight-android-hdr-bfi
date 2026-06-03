@@ -4074,8 +4074,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         final Spinner hdrModeSpinner = createSpinner(root,
                 "HDR mode",
-                new String[]{"Off", "HDR10 (PQ)", "scRGB (FP16)"},
-                new int[]{0, 1, 2},
+                new String[]{"Off", "scRGB (FP16)"},
+                new int[]{0, 2},
                 prefConfig.videoHdrMode);
 
         final int[] paperWhiteValues = new int[]{150, 200, 250, 300};

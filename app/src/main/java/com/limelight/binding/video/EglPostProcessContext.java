@@ -62,7 +62,8 @@ public final class EglPostProcessContext {
         while (true) {
             EGLConfig config = chooseConfig(mode);
             if (config != null) {
-                int glEsVersion = (mode.equals("scRGB") && extColorspaceScrgbLinear) ? 3 : 2;
+                // Always request GLES 3 so the libretro HDR composite shader compiles.
+                int glEsVersion = 3;
                 if (createContext(config, glEsVersion) && createSurface(config, mode)) {
                     if (EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
                         actualMode = mode;
@@ -174,7 +175,7 @@ public final class EglPostProcessContext {
                         EGL14.EGL_BLUE_SIZE, 8,
                         EGL14.EGL_ALPHA_SIZE, 8
                 };
-                renderableType = EGL14.EGL_OPENGL_ES2_BIT;
+                renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
                 break;
             default:
                 baseAttribs = new int[] {
@@ -183,7 +184,7 @@ public final class EglPostProcessContext {
                         EGL14.EGL_BLUE_SIZE, 8,
                         EGL14.EGL_ALPHA_SIZE, 8
                 };
-                renderableType = EGL14.EGL_OPENGL_ES2_BIT;
+                renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
                 break;
         }
 
@@ -203,7 +204,31 @@ public final class EglPostProcessContext {
         if (!EGL14.eglChooseConfig(eglDisplay, configAttribs, 0, configs, 0, 1, numConfigs, 0) || numConfigs[0] == 0) {
             return null;
         }
-        return configs[0];
+        EGLConfig config = configs[0];
+        logConfigAttributes(config);
+        return config;
+    }
+
+    private void logConfigAttributes(EGLConfig config) {
+        int[] value = new int[1];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_RED_SIZE, value, 0);
+        int red = value[0];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_GREEN_SIZE, value, 0);
+        int green = value[0];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_BLUE_SIZE, value, 0);
+        int blue = value[0];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_ALPHA_SIZE, value, 0);
+        int alpha = value[0];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_DEPTH_SIZE, value, 0);
+        int depth = value[0];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_NATIVE_VISUAL_ID, value, 0);
+        int visualId = value[0];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_CONFIG_CAVEAT, value, 0);
+        int caveat = value[0];
+        String caveatStr = caveat == EGL14.EGL_NONE ? "none" : (caveat == EGL14.EGL_SLOW_CONFIG ? "slow" : "unknown");
+        LimeLog.info("PostProcess: EGL config R=" + red + " G=" + green + " B=" + blue
+                + " A=" + alpha + " D=" + depth + " visual=0x" + Integer.toHexString(visualId)
+                + " caveat=" + caveatStr);
     }
 
     private boolean createContext(EGLConfig config, int glEsVersion) {

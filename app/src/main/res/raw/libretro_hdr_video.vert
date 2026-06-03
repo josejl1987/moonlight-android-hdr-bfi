@@ -1,17 +1,16 @@
+#version 300 es
 // SPDX-License-Identifier: MIT
 //
 // Ported from RetroArch's gfx/drivers/vulkan_shaders/hdr.vert
 // (c) Libretro contributors.
 //
-// This is a direct GLES 2.0 port of the Vulkan vertex shader.
-// The only adaptations are:
-//   1. attribute is used instead of layout(location = ...).
-//   2. varying is used instead of out.
+// GLES 3.0 adaptation:
+//   1. in/out instead of attribute/varying.
 
-attribute vec4 aPosition;
-attribute vec2 aTexCoord;
+in vec4 aPosition;
+in vec2 aTexCoord;
 
-varying vec2 vTexCoord;
+out vec2 vTexCoord;
 
 void main()
 {

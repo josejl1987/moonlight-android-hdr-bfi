@@ -87,6 +87,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private long accumulatedLatencyNs;
     private int statsFrameCount;
 
+    private int intervalRenderCalls;
+    private int intervalFramesRendered;
+    private int intervalFramesSkipped;
+    private long intervalLatencyNs;
+
     private static final float[] QUAD_VERTICES = {
             -1.0f, -1.0f,
              1.0f, -1.0f,
@@ -205,6 +210,12 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             return false;
         }
 
+        // Host HDR streams bypass the client composite entirely; do not
+        // enable post-process for them until a host-HDR-safe path exists.
+        if (hostHdrStreamActive) {
+            return false;
+        }
+
         if (prefs.postProcessRendererMode == PreferenceConfiguration.POST_PROCESS_FORCE) {
             return true;
         }
@@ -219,7 +230,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         float required = prefs.fps * (1.0f + Math.max(1, darkFrames));
         boolean bfiUseful = prefs.videoBlackFrameInsertion
                 && Math.abs(displayRefreshRate - required) <= 3.0f;
-        boolean hdrUseful = prefs.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF && !hostHdrStreamActive;
+        boolean hdrUseful = prefs.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF;
 
         return bfiUseful || hdrUseful;
     }
@@ -245,8 +256,22 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         refreshResolvedSettings(false);
 
+        // Clamp HDRMode against the actual EGL mode we got (may have fallen back).
+        String actualMode = eglContext.getActualMode();
+        if (!"scRGB".equals(actualMode) && hdrUniforms.hdrMode == LibretroHdrUniforms.HDR_MODE_SCRGB) {
+            hdrUniforms.hdrMode = LibretroHdrUniforms.HDR_MODE_OFF;
+            hdrUniforms.inverseTonemap = 0.0f;
+            hdrUniforms.hdr10 = 0.0f;
+        }
+
+        // Initialize size uniforms from the stream configuration.
+        hdrUniforms.sourceWidth = prefConfig.width;
+        hdrUniforms.sourceHeight = prefConfig.height;
+        hdrUniforms.outputWidth = prefConfig.width;
+        hdrUniforms.outputHeight = prefConfig.height;
+
         LimeLog.info("PostProcess: target=" + targetMode
-                + " actual=" + eglContext.getActualMode()
+                + " actual=" + actualMode
                 + " hdrMode=" + hdrUniforms.hdrMode);
 
         int[] textures = new int[1];
@@ -363,6 +388,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         totalRenderCalls++;
+        intervalRenderCalls++;
 
         if (isBlack || frameStalled) {
             GLES20.glClearColor(0f, 0f, 0f, 1f);
@@ -435,14 +461,17 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
             if (consumedNewFrame) {
                 accumulatedLatencyNs += (nowNs - lastFrameArrivalNs);
+                intervalLatencyNs += (nowNs - lastFrameArrivalNs);
             }
             framesRendered++;
+            intervalFramesRendered++;
         } else {
             if (!bfiScheduler.isEnabled()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
             }
             framesSkippedNoInput++;
+            intervalFramesSkipped++;
         }
 
         if (!recoveryFailed) {
@@ -471,24 +500,35 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         framesSkippedNoInput = 0;
         accumulatedLatencyNs = 0;
         statsFrameCount = 0;
+        intervalRenderCalls = 0;
+        intervalFramesRendered = 0;
+        intervalFramesSkipped = 0;
+        intervalLatencyNs = 0;
     }
 
     private void logStats() {
-        if (totalRenderCalls == 0) return;
+        if (intervalRenderCalls == 0) return;
 
-        float avgLatencyMs = framesRendered > 0
-                ? (accumulatedLatencyNs / (float) framesRendered) / 1_000_000f
+        float avgLatencyMs = intervalFramesRendered > 0
+                ? (intervalLatencyNs / (float) intervalFramesRendered) / 1_000_000f
                 : 0f;
 
-        float renderRateHz = (float) totalRenderCalls * displayRefreshRate / (float) statsFrameCount;
-        float actualFps = (float) framesRendered * displayRefreshRate / (float) statsFrameCount;
+        float renderRateHz = (float) intervalRenderCalls * displayRefreshRate / (float) statsFrameCount;
+        float actualFps = (float) intervalFramesRendered * displayRefreshRate / (float) statsFrameCount;
 
-        LimeLog.info("PostProcess: stats render=" + totalRenderCalls
-                + " displayed=" + framesRendered
-                + " skipped=" + framesSkippedNoInput
+        LimeLog.info("PostProcess: stats interval=" + statsFrameCount
+                + " render=" + intervalRenderCalls
+                + " displayed=" + intervalFramesRendered
+                + " skipped=" + intervalFramesSkipped
                 + " renderHz=" + String.format("%.1f", renderRateHz)
                 + " fps=" + String.format("%.1f", actualFps)
-                + " avgLatency=" + String.format("%.2f", avgLatencyMs) + "ms");
+                + " avgLatency=" + String.format("%.2f", avgLatencyMs) + "ms"
+                + " cumulative=" + totalRenderCalls + "/" + framesRendered);
+
+        intervalRenderCalls = 0;
+        intervalFramesRendered = 0;
+        intervalFramesSkipped = 0;
+        intervalLatencyNs = 0;
     }
 
     private void releaseGl() {
@@ -535,7 +575,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     public void updateSettings(PreferenceConfiguration prefs) {
-        refreshResolvedSettings(true);
+        Handler handler = renderHandler;
+        if (handler != null) {
+            handler.post(() -> refreshResolvedSettings(true));
+        }
     }
 
     private void refreshResolvedSettings(boolean logChanges) {
@@ -557,11 +600,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         hdrUniforms.inverseTonemap  = (hdrUniforms.hdrMode != LibretroHdrUniforms.HDR_MODE_OFF) ? 1.0f : 0.0f;
         hdrUniforms.hdr10           = 0.0f;
 
-        bfiScheduler.configure(
-                prefConfig.videoBlackFrameInsertion,
-                Math.max(1, prefConfig.videoBfiDarkFrames));
-        boolean bfiActive = bfiScheduler.isEnabled()
-                && bfiScheduler.canEnable(streamFps, displayRefreshRate, prefConfig.videoBfiDarkFrames);
+        int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
+        boolean bfiActive = prefConfig.videoBlackFrameInsertion
+                && bfiScheduler.canEnable(streamFps, displayRefreshRate, darkFrames);
+        bfiScheduler.configure(bfiActive, darkFrames);
 
         if (logChanges) {
             LimeLog.info("PostProcess: HDR mode=" + hdrUniforms.hdrMode
@@ -679,6 +721,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
         GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        // SDR adapter texture. Host HDR (10-bit/PQ) is intentionally not supported
+        // here; the post-process renderer is disabled for host HDR streams.
         GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA,
                 width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
 

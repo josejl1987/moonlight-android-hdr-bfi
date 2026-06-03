@@ -3,13 +3,13 @@
 // Ported from RetroArch's gfx/drivers/vulkan_shaders/hdr_common.glsl
 // (c) Libretro contributors.
 //
-// This is a direct GLES 2.0 port of the Vulkan UBO and helper math.
+// This is a GLES 3.0 port of the Vulkan UBO and helper math.
 // The only adaptations are:
-//   1. The Vulkan UBO block becomes individual uniforms (GLES 2.0 has no UBO).
-//   2. uint types become int (GLES 2.0 has no uint).
-//   3. texture(Source, ...) becomes texture2D(Source, ...) after the OES adapter pass.
+//   1. The Vulkan UBO block becomes individual uniforms.
+//   2. uint types become int.
+//   3. texture(Source, ...) is used directly.
 
-// libretro HDR uniform block (Vulkan UBO). On Android GLES 2.0 we declare
+// libretro HDR uniform block (Vulkan UBO). On Android GLES 3.0 we declare
 // each member individually. The names match the libretro spec exactly.
 uniform mat4  MVP;
 uniform vec4  SourceSize;

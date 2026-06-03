@@ -1,19 +1,18 @@
+#version 300 es
 // SPDX-License-Identifier: MIT
 //
 // Ported from RetroArch's gfx/drivers/vulkan_shaders/hdr_tonemap.frag
 // (c) Libretro contributors.
 //
-// This is a direct GLES 2.0 port of the Vulkan tonemap/readback shader.
-// The only adaptations are:
+// GLES 3.0 adaptation:
 //   1. The Vulkan UBO block becomes individual uniforms.
-//   2. uint types become int (GLES 2.0 has no uint).
-//   3. texture(Source, ...) becomes texture2D(Source, ...) for OES video.
-//   4. gl_FragColor is used instead of out vec4 FragColor.
-//   5. varying is used instead of in/out.
+//   2. in/out instead of varying.
+//   3. texture() instead of texture().
 
 precision highp float;
 
-varying vec2 vTexCoord;
+in vec2 vTexCoord;
+out vec4 FragColor;
 
 uniform sampler2D Source;
 
@@ -40,7 +39,7 @@ vec3 LinearToSRGB(vec3 c)
 
 void main()
 {
-   vec4 source = texture2D(Source, vTexCoord);
+   vec4 source = texture(Source, vTexCoord);
    vec3 sdr_linear;
 
    if (HDRMode == 1)
@@ -68,5 +67,5 @@ void main()
    }
 
    /* B8G8R8A8_UNORM target — apply sRGB OETF so the PNG looks right. */
-   gl_FragColor = vec4(LinearToSRGB(sdr_linear), 1.0);
+   FragColor = vec4(LinearToSRGB(sdr_linear), 1.0);
 }
