@@ -28,6 +28,7 @@ import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
+import com.limelight.binding.video.PostProcessVideoRenderer;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
 import com.limelight.nvstream.StreamConfiguration;
@@ -231,6 +232,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private TextView performanceOverlayBig;
 
     private MediaCodecDecoderRenderer decoderRenderer;
+    private PostProcessVideoRenderer postProcessRenderer;
     private boolean reportedCrash;
 
     private WifiManager.WifiLock highPerfWifiLock;
@@ -866,13 +868,40 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         streamContainer.setOnSurfaceAvailable(() -> {
             if (!attemptedConnection) {
-                LimeLog.info("Surface is available, starting connection...");
                 attemptedConnection = true;
 
-                // Der Decoder erhält die jeweils aktive Oberfläche vom Container
-                decoderRenderer.setRenderTarget(streamContainer.getSurface());
+                Surface renderSurface = streamContainer.getSurface();
 
-                // Starten Sie die NvConnection
+                if (PostProcessVideoRenderer.shouldUse(
+                        Game.this,
+                        renderSurface,
+                        prefConfig,
+                        displayRefreshRate,
+                        willStreamHdr)) {
+                    try {
+                        postProcessRenderer = new PostProcessVideoRenderer(
+                                Game.this,
+                                renderSurface,
+                                prefConfig,
+                                prefConfig.fps,
+                                displayRefreshRate,
+                                willStreamHdr
+                        );
+                        postProcessRenderer.start();
+                        decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
+                        LimeLog.info("Post-process renderer enabled");
+                    } catch (Throwable t) {
+                        LimeLog.warning("Post-process renderer failed; falling back to direct surface: " + t);
+                        if (postProcessRenderer != null) {
+                            postProcessRenderer.release();
+                            postProcessRenderer = null;
+                        }
+                        decoderRenderer.setRenderTarget(renderSurface);
+                    }
+                } else {
+                    decoderRenderer.setRenderTarget(renderSurface);
+                }
+
                 conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
                         decoderRenderer, Game.this);
             }
@@ -1737,6 +1766,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             unbindService(usbDriverServiceConnection);
         }
 
+        if (postProcessRenderer != null) {
+            postProcessRenderer.release();
+            postProcessRenderer = null;
+        }
+
         // Destroy the capture provider
         inputCaptureProvider.destroy();
         streamContainer.onDestroy();
@@ -1773,6 +1807,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         if(keyBoardLayoutController!=null){
             keyBoardLayoutController.hide();
+        }
+
+        if (postProcessRenderer != null) {
+            postProcessRenderer.stop();
         }
 
         if (conn != null) {
