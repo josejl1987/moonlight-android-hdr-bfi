@@ -272,14 +272,14 @@
         <item>2</item>
     </string-array>
 
-    <!-- Paper white nits (RetroArch default is 200). -->
-    <string-array name="paper_white_nits_names">
+    <!-- Brightness nits (RetroArch default is 200). -->
+    <string-array name="brightness_nits_names">
         <item>@string/paper_white_150</item>
         <item>@string/paper_white_200</item>
         <item>@string/paper_white_250</item>
         <item>@string/paper_white_300</item>
     </string-array>
-    <string-array name="paper_white_nits_values" translatable="false">
+    <string-array name="brightness_nits_values" translatable="false">
         <item>150</item>
         <item>200</item>
         <item>250</item>

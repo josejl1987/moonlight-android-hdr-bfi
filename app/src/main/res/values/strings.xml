@@ -742,8 +742,8 @@
     <string name="video_hdr_off">Off</string>
     <string name="video_hdr_hdr10">HDR10 (PQ)</string>
     <string name="video_hdr_scrgb">scRGB (FP16)</string>
-    <string name="title_video_hdr_paper_white">Paper white</string>
-    <string name="summary_video_hdr_paper_white">SDR white reference in nits. RetroArch default is 200 nits.</string>
+    <string name="title_video_hdr_paper_white">Brightness</string>
+    <string name="summary_video_hdr_paper_white">Brightness in nits for the HDR shader. RetroArch default is 200 nits.</string>
     <string name="paper_white_150">150 nits</string>
     <string name="paper_white_200">200 nits</string>
     <string name="paper_white_250">250 nits</string>

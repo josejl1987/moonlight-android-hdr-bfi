@@ -242,8 +242,8 @@
             app:iconSpaceReserved="false" />
         <ListPreference
             android:defaultValue="200"
-            android:entries="@array/paper_white_nits_names"
-            android:entryValues="@array/paper_white_nits_values"
+            android:entries="@array/brightness_nits_names"
+            android:entryValues="@array/brightness_nits_values"
             android:key="list_video_hdr_paper_white_nits"
             android:summary="@string/summary_video_hdr_paper_white"
             android:title="@string/title_video_hdr_paper_white"

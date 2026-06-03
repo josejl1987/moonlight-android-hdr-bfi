@@ -4063,7 +4063,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView intro = new TextView(this);
-        intro.setText("Adjust the live post-process pipeline while streaming. Paper white is the SDR brightness reference, measured in nits.");
+        intro.setText("Adjust the live post-process pipeline while streaming. Brightness is the HDR shader's nits reference, measured in nits.");
         intro.setPadding(0, 0, 0, pad);
         root.addView(intro);
 
@@ -4078,15 +4078,15 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 new int[]{0, 2},
                 prefConfig.videoHdrMode);
 
-        final int[] paperWhiteValues = new int[]{150, 200, 250, 300};
-        final TextView paperWhiteLabel = new TextView(this);
-        paperWhiteLabel.setPadding(0, pad / 2, 0, 8);
-        root.addView(paperWhiteLabel);
+        final int[] brightnessValues = new int[]{150, 200, 250, 300};
+        final TextView brightnessLabel = new TextView(this);
+        brightnessLabel.setPadding(0, pad / 2, 0, 8);
+        root.addView(brightnessLabel);
 
-        final SeekBar paperWhiteSeek = new SeekBar(this);
-        paperWhiteSeek.setMax(paperWhiteValues.length - 1);
-        paperWhiteSeek.setProgress(indexOfValue(paperWhiteValues, prefConfig.videoHdrPaperWhiteNits));
-        root.addView(paperWhiteSeek);
+        final SeekBar brightnessSeek = new SeekBar(this);
+        brightnessSeek.setMax(brightnessValues.length - 1);
+        brightnessSeek.setProgress(indexOfValue(brightnessValues, prefConfig.videoHdrPaperWhiteNits));
+        root.addView(brightnessSeek);
 
         final CheckBox bfiCheck = new CheckBox(this);
         bfiCheck.setText("Black frame insertion");
@@ -4106,14 +4106,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 prefConfig.videoBfiCompensationMode);
         root.addView(compSpinner);
 
-        updatePaperWhiteLabel(paperWhiteLabel, paperWhiteValues[paperWhiteSeek.getProgress()]);
+        updateBrightnessLabel(brightnessLabel, brightnessValues[brightnessSeek.getProgress()]);
 
         hdrModeSpinner.setOnItemSelectedListener(new SimpleSpinnerListener());
         darkFrameSpinner.setOnItemSelectedListener(new SimpleSpinnerListener());
-        paperWhiteSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        brightnessSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                updatePaperWhiteLabel(paperWhiteLabel, paperWhiteValues[progress]);
+                updateBrightnessLabel(brightnessLabel, brightnessValues[progress]);
             }
 
             @Override
