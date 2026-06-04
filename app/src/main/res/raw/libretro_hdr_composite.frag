@@ -327,7 +327,7 @@ vec3 GenerateScanline( const vec2 tex_coord,
  * HDR10 path: mask in Rec.2020 (output is BT.2020)
  * scRGB path: mask in Rec.709 (output is scRGB/Rec.709)
  * Returns fully processed linear colour with mask applied. */
-vec3 Scanlines(vec2 texcoord)
+vec3 applyScanlines(vec2 texcoord)
 {
    vec2 source_size         = SourceSize.xy;
    vec2 output_size         = OutputSize.xy;
@@ -406,7 +406,7 @@ void main()
       {
          /* Scanlines() returns linear Rec.709 with mask already applied in Rec.709 space.
           * scRGB units: 1.0 = 80 nits. */
-         vec3 linear = Scanlines(vTexCoord);
+         vec3 linear = applyScanlines(vTexCoord);
 
          FragColor = vec4(linear * (BrightnessNits / kscRGBWhiteNits), 1.0);
       }
@@ -429,7 +429,7 @@ void main()
       if((Scanlines > 0.0) && (OutputSize.y > 240.0 * 4.0))
       {
          /* Scanlines() returns linear Rec.2020 with InverseTonemap and mask applied */
-          FragColor = vec4(ApplyHDR10(Scanlines(vTexCoord)), 1.0);
+          FragColor = vec4(ApplyHDR10(applyScanlines(vTexCoord)), 1.0);
       }
       else
       {

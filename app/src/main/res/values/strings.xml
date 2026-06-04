@@ -740,8 +740,7 @@
     <string name="title_video_hdr_mode">HDR mode</string>
     <string name="summary_video_hdr_mode">HDR output mode for the post-process renderer</string>
     <string name="video_hdr_off">Off</string>
-    <!-- HDR10 hidden until PQ/EGL BT.2020 is implemented -->
-    <!-- string name="video_hdr_hdr10">HDR10 (PQ)</string -->
+    <string name="video_hdr_hdr10">HDR10 (PQ)</string>
     <string name="video_hdr_scrgb">scRGB (FP16)</string>
     <string name="title_video_hdr_paper_white">Brightness</string>
     <string name="summary_video_hdr_paper_white">Brightness in nits for the HDR shader. RetroArch default is 200 nits.</string>

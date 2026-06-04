@@ -16,10 +16,12 @@ public final class EglPostProcessContext {
     private static final int EGL_GL_COLORSPACE_KHR = 0x309D;
     private static final int EGL_GL_COLORSPACE_SRGB_KHR = 0x3089;
     private static final int EGL_GL_COLORSPACE_LINEAR_KHR = 0x308A;
-    private static final int EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT = 0x3340;
-    private static final int EGL_GL_COLORSPACE_SCRGB_EXT = 0x3358;
-    private static final int EGL_GL_COLORSPACE_BT2020_PQ_EXT = 0x3341;
+    private static final int EGL_GL_COLORSPACE_BT2020_PQ_EXT = 0x3340;
+    private static final int EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT = 0x3350;
+    private static final int EGL_GL_COLORSPACE_SCRGB_EXT = 0x3351;
     private static final int EGL_GL_COLORSPACE_BT2020_LINEAR_EXT = 0x333F;
+    private static final int EGL_GL_COLORSPACE_DISPLAY_P3_EXT = 0x3363;
+    private static final int EGL_GL_COLORSPACE_DISPLAY_P3_LINEAR_EXT = 0x3362;
     private static final int EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT = 0x3490;
 
     private static final int EGL_OPENGL_ES3_BIT = 0x0040;
@@ -63,38 +65,32 @@ public final class EglPostProcessContext {
 
         probeExtensions();
 
-        String mode = requestMode;
-        while (true) {
+        for (String mode : fallbackChain(requestMode)) {
             EGLConfig config = chooseConfig(mode);
-            if (config != null) {
-                // Always request GLES 3 so the libretro HDR composite shader compiles.
-                int glEsVersion = 3;
-                if (createContext(config, glEsVersion) && createSurface(config, mode)) {
-                    if (EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
-                        actualMode = mode;
-                        actualGlEsVersion = glEsVersion;
-                        initialized = true;
-                        logSurfaceFormat();
-                        String msg = "PostProcess: EGL initialized in " + actualMode + " mode (GL ES " + glEsVersion + ")";
-                        LimeLog.info(msg);
-                        Log.d("PostProcess", msg);
-                        return true;
-                    }
-                    destroySurface();
+            if (config == null) {
+                continue;
+            }
+            if (createContext(config, 3) && createSurface(config, mode)) {
+                if (EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+                    actualMode = mode;
+                    actualGlEsVersion = 3;
+                    initialized = true;
+                    logSurfaceFormat();
+                    String msg = "PostProcess: EGL initialized in " + actualMode + " mode (GL ES 3)";
+                    LimeLog.info(msg);
+                    Log.d("PostProcess", msg);
+                    return true;
                 }
-                destroyContext();
+                destroySurface();
             }
-            mode = nextFallback(mode);
-            if (mode == null) {
-                LimeLog.warning("PostProcess: all EGL configs failed");
-                Log.d("PostProcess", "all EGL configs failed");
-                release();
-                return false;
-            }
-            String fbMsg = "PostProcess: falling back to " + mode;
-            LimeLog.info(fbMsg);
-            Log.d("PostProcess", fbMsg);
+            destroyContext();
+            LimeLog.info("PostProcess: falling back from " + mode);
         }
+
+        LimeLog.warning("PostProcess: all EGL configs failed");
+        Log.d("PostProcess", "all EGL configs failed");
+        release();
+        return false;
     }
 
     public boolean makeCurrent() {
@@ -206,7 +202,6 @@ public final class EglPostProcessContext {
     private EGLConfig chooseConfig(String mode) {
         int[] baseAttribs;
         int renderableType;
-        boolean allow8bitFallback = false;
 
         switch (mode) {
             case "scRGB":
@@ -218,7 +213,6 @@ public final class EglPostProcessContext {
                         EGL14.EGL_ALPHA_SIZE, 16
                 };
                 renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
-                allow8bitFallback = true;
                 break;
             case "HDR10":
                 if (!extColorspaceBt2020Pq) return null;
@@ -254,20 +248,7 @@ public final class EglPostProcessContext {
                 break;
         }
 
-        EGLConfig config = tryConfig(baseAttribs, renderableType);
-        if (config == null && allow8bitFallback) {
-            String fbMsg = "PostProcess: 16-bit scRGB config failed, trying 8-bit scRGB";
-            LimeLog.info(fbMsg);
-            Log.d("PostProcess", fbMsg);
-            baseAttribs = new int[] {
-                    EGL14.EGL_RED_SIZE, 8,
-                    EGL14.EGL_GREEN_SIZE, 8,
-                    EGL14.EGL_BLUE_SIZE, 8,
-                    EGL14.EGL_ALPHA_SIZE, 8
-            };
-            config = tryConfig(baseAttribs, renderableType);
-        }
-        return config;
+        return tryConfig(baseAttribs, renderableType);
     }
 
     private EGLConfig tryConfig(int[] baseAttribs, int renderableType) {
@@ -449,16 +430,16 @@ public final class EglPostProcessContext {
         }
     }
 
-    private static String nextFallback(String mode) {
-        switch (mode) {
+    private static String[] fallbackChain(String requestedMode) {
+        switch (requestedMode) {
             case "HDR10":
-                return "scRGB";
+                return new String[] {"HDR10", "scRGB", "Display P3", "SDR"};
             case "scRGB":
-                return "Display P3";
+                return new String[] {"scRGB", "HDR10", "Display P3", "SDR"};
             case "Display P3":
-                return "SDR";
+                return new String[] {"Display P3", "SDR"};
             default:
-                return null;
+                return new String[] {"SDR"};
         }
     }
 }

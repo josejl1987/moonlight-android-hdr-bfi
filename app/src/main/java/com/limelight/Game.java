@@ -4037,6 +4037,21 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         });
     }
 
+    @Override
+    public void onPostProcessHdrModeChanged(final boolean hdrActive) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getWindow().setColorMode(hdrActive
+                            ? ActivityInfo.COLOR_MODE_HDR
+                            : ActivityInfo.COLOR_MODE_DEFAULT);
+                    LimeLog.info("Display: setColorMode(" + (hdrActive ? "HDR" : "DEFAULT") + ")");
+                }
+            }
+        });
+    }
+
     public void showPostProcessQuickPanel() {
         // Always allow the panel so the user can adjust settings, even if
         // the renderer is inactive (init failed, currently stopped, etc.).
@@ -4050,74 +4065,62 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        TextView intro = new TextView(this);
-        intro.setText("Adjust the live post-process pipeline while streaming. Brightness is the HDR shader's nits reference, measured in nits.");
-        intro.setPadding(0, 0, 0, pad);
-        root.addView(intro);
+        // Diagnostic status
+        TextView status = new TextView(this);
+        status.setText(postProcessRenderer != null
+                ? "Renderer: active \u2014 changes apply live"
+                : "Renderer: inactive \u2014 settings apply on next stream start");
+        status.setPadding(0, 0, 0, pad);
+        root.addView(status);
 
-        TextView hint = new TextView(this);
-        hint.setText("BFI dark frames = 1 gives a 2-refresh cycle: visible, black, visible, black.");
-        hint.setPadding(0, 0, 0, pad);
-        root.addView(hint);
+        // Renderer mode
+        final Spinner rendererSpinner = createSpinner(root,
+                getString(R.string.title_postprocess_renderer),
+                R.array.postprocess_renderer_names,
+                R.array.postprocess_renderer_values,
+                prefConfig.postProcessRendererMode);
 
+        // HDR mode
         final Spinner hdrModeSpinner = createSpinner(root,
-                "HDR mode",
-                new String[]{"Off", "scRGB (FP16)"},
-                new int[]{0, 2},
+                getString(R.string.title_video_hdr_mode),
+                R.array.video_hdr_mode_names,
+                R.array.video_hdr_mode_values,
                 prefConfig.videoHdrMode);
 
-        final int[] brightnessValues = new int[]{150, 200, 250, 300};
-        final TextView brightnessLabel = new TextView(this);
-        brightnessLabel.setPadding(0, pad / 2, 0, 8);
-        root.addView(brightnessLabel);
+        // Brightness
+        final Spinner brightnessSpinner = createSpinner(root,
+                getString(R.string.title_video_hdr_paper_white),
+                R.array.brightness_nits_names,
+                R.array.brightness_nits_values,
+                prefConfig.videoHdrPaperWhiteNits);
 
-        final SeekBar brightnessSeek = new SeekBar(this);
-        brightnessSeek.setMax(brightnessValues.length - 1);
-        brightnessSeek.setProgress(indexOfValue(brightnessValues, prefConfig.videoHdrPaperWhiteNits));
-        root.addView(brightnessSeek);
-
+        // BFI
         final CheckBox bfiCheck = new CheckBox(this);
-        bfiCheck.setText("Black frame insertion");
+        bfiCheck.setText(R.string.title_video_bfi);
         bfiCheck.setChecked(prefConfig.videoBlackFrameInsertion);
         root.addView(bfiCheck);
 
+        // BFI dark frames
         final Spinner darkFrameSpinner = createSpinner(root,
-                "BFI dark frames",
-                new String[]{"1", "2", "3"},
-                new int[]{1, 2, 3},
+                getString(R.string.title_video_bfi_dark_frames),
+                R.array.video_bfi_dark_frames_names,
+                R.array.video_bfi_dark_frames_values,
                 prefConfig.videoBfiDarkFrames);
 
+        // BFI compensation
         final Spinner compSpinner = createSpinner(root,
-                "BFI compensation",
-                new String[]{"Off", "Conservative", "Full"},
-                new int[]{0, 1, 2},
+                getString(R.string.title_video_bfi_compensation),
+                R.array.video_bfi_compensation_names,
+                R.array.video_bfi_compensation_values,
                 prefConfig.videoBfiCompensationMode);
 
-        updateBrightnessLabel(brightnessLabel, brightnessValues[brightnessSeek.getProgress()]);
-
-        hdrModeSpinner.setOnItemSelectedListener(new SimpleSpinnerListener());
-        darkFrameSpinner.setOnItemSelectedListener(new SimpleSpinnerListener());
-        brightnessSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                updateBrightnessLabel(brightnessLabel, brightnessValues[progress]);
-            }
-
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {
-            }
-
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {
-            }
-        });
-
         new AlertDialog.Builder(this)
-                .setTitle("Post-process quick setup")
+                .setTitle(R.string.game_menu_postprocess_quick_setup)
                 .setView(scrollView)
                 .setPositiveButton("Apply", (dialog, which) -> {
+                    prefConfig.postProcessRendererMode = spinnerValue(rendererSpinner);
                     prefConfig.videoHdrMode = spinnerValue(hdrModeSpinner);
-                    prefConfig.videoHdrPaperWhiteNits = brightnessValues[brightnessSeek.getProgress()];
+                    prefConfig.videoHdrPaperWhiteNits = spinnerValue(brightnessSpinner);
                     prefConfig.videoBlackFrameInsertion = bfiCheck.isChecked();
                     prefConfig.videoBfiDarkFrames = spinnerValue(darkFrameSpinner);
                     prefConfig.videoBfiCompensationMode = spinnerValue(compSpinner);
@@ -4127,32 +4130,34 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 .show();
     }
 
-    private void updateBrightnessLabel(TextView label, int nits) {
-        label.setText("HDR brightness: " + nits + " nits");
-    }
-
-    private Spinner createSpinner(LinearLayout parent, String label, String[] displayValues, int[] numericValues, int currentValue) {
+    private Spinner createSpinner(LinearLayout parent, String label,
+                                   int namesArrayRes, int valuesArrayRes, int currentValue) {
         TextView textView = new TextView(this);
         textView.setText(label);
         textView.setPadding(0, 0, 0, 8);
         parent.addView(textView);
 
         Spinner spinner = new Spinner(this);
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, displayValues);
+        String[] names = getResources().getStringArray(namesArrayRes);
+        int[] values = intArray(valuesArrayRes);
+
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, names);
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         spinner.setAdapter(adapter);
-        spinner.setTag(numericValues);
-
-        int selectedIndex = 0;
-        for (int i = 0; i < numericValues.length; i++) {
-            if (numericValues[i] == currentValue) {
-                selectedIndex = i;
-                break;
-            }
-        }
-        spinner.setSelection(selectedIndex);
+        spinner.setTag(values);
+        spinner.setSelection(indexOfValue(values, currentValue));
         parent.addView(spinner);
         return spinner;
+    }
+
+    private int[] intArray(int arrayRes) {
+        String[] strings = getResources().getStringArray(arrayRes);
+        int[] values = new int[strings.length];
+        for (int i = 0; i < strings.length; i++) {
+            values[i] = Integer.parseInt(strings[i]);
+        }
+        return values;
     }
 
     private int indexOfValue(int[] values, int currentValue) {
@@ -4173,29 +4178,18 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         return values[position];
     }
 
-    private static final class SimpleSpinnerListener implements android.widget.AdapterView.OnItemSelectedListener {
-
-        @Override
-        public void onItemSelected(android.widget.AdapterView<?> parent, View view, int position, long id) {
-        }
-
-        @Override
-        public void onNothingSelected(android.widget.AdapterView<?> parent) {
-        }
-    }
-
     private void persistAndApplyPostProcessSettings() {
         SharedPreferences.Editor editor = PreferenceManager.getDefaultSharedPreferences(this).edit();
-        editor.putString("list_video_hdr_mode", Integer.toString(prefConfig.videoHdrMode));
-        editor.putString("list_video_hdr_paper_white_nits", Integer.toString(prefConfig.videoHdrPaperWhiteNits));
-        editor.putBoolean("checkbox_video_bfi", prefConfig.videoBlackFrameInsertion);
-        editor.putString("list_video_bfi_dark_frames", Integer.toString(prefConfig.videoBfiDarkFrames));
-        editor.putString("list_video_bfi_compensation", Integer.toString(prefConfig.videoBfiCompensationMode));
+        PreferenceConfiguration.writePostProcessPreferences(editor, prefConfig);
         editor.apply();
 
         if (postProcessRenderer != null) {
             postProcessRenderer.updateSettings();
             showPostProcessOverlay(true);
+        } else {
+            Toast.makeText(this,
+                    "Saved. Restart stream or set renderer to Force before connecting.",
+                    Toast.LENGTH_LONG).show();
         }
     }
 

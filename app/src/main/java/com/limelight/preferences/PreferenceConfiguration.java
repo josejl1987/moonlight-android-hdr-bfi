@@ -111,15 +111,15 @@ public class PreferenceConfiguration {
 
     private static final String CHECKBOX_ENABLE_STICKY_MODIFIER_KEY_VIRTUAL_KEYBOARD = "checkbox_enable_sticky_modifier_key_virtual_keyboard";
 
-    private static final String POST_PROCESS_RENDERER_PREF_STRING = "list_postprocess_renderer";
-    private static final String VIDEO_HDR_MODE_PREF_STRING = "list_video_hdr_mode";
-    private static final String VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING = "list_video_hdr_paper_white_nits";
-    private static final String VIDEO_HDR_EXPAND_GAMUT_PREF_STRING = "list_video_hdr_expand_gamut";
-    private static final String VIDEO_HDR_SCANLINES_PREF_STRING = "checkbox_video_hdr_scanlines";
-    private static final String VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING = "list_video_hdr_subpixel_layout";
-    private static final String VIDEO_BFI_PREF_STRING = "checkbox_video_bfi";
-    private static final String VIDEO_BFI_DARK_FRAMES_PREF_STRING = "list_video_bfi_dark_frames";
-    private static final String VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING = "list_video_bfi_compensation";
+    public static final String POST_PROCESS_RENDERER_PREF_STRING = "list_postprocess_renderer";
+    public static final String VIDEO_HDR_MODE_PREF_STRING = "list_video_hdr_mode";
+    public static final String VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING = "list_video_hdr_paper_white_nits";
+    public static final String VIDEO_HDR_EXPAND_GAMUT_PREF_STRING = "list_video_hdr_expand_gamut";
+    public static final String VIDEO_HDR_SCANLINES_PREF_STRING = "checkbox_video_hdr_scanlines";
+    public static final String VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING = "list_video_hdr_subpixel_layout";
+    public static final String VIDEO_BFI_PREF_STRING = "checkbox_video_bfi";
+    public static final String VIDEO_BFI_DARK_FRAMES_PREF_STRING = "list_video_bfi_dark_frames";
+    public static final String VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING = "list_video_bfi_compensation";
 
     private static final String CHECKBOX_ENABLE_QUIT_DIALOG = "checkbox_enable_quit_dialog";
 
@@ -1126,5 +1126,17 @@ private static int getFramePacingValue(Context context) {
         config.balance_shift = prefs.getInt(BALANCE_SHIFT, 50) / 100f;
 
         return config;
+    }
+
+    public static void writePostProcessPreferences(SharedPreferences.Editor editor, PreferenceConfiguration config) {
+        editor.putString(POST_PROCESS_RENDERER_PREF_STRING, Integer.toString(config.postProcessRendererMode));
+        editor.putString(VIDEO_HDR_MODE_PREF_STRING, Integer.toString(config.videoHdrMode));
+        editor.putString(VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, Integer.toString(config.videoHdrPaperWhiteNits));
+        editor.putString(VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, Integer.toString(config.videoHdrExpandGamut));
+        editor.putBoolean(VIDEO_HDR_SCANLINES_PREF_STRING, config.videoHdrScanlines);
+        editor.putString(VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING, Integer.toString(config.videoHdrSubpixelLayout));
+        editor.putBoolean(VIDEO_BFI_PREF_STRING, config.videoBlackFrameInsertion);
+        editor.putString(VIDEO_BFI_DARK_FRAMES_PREF_STRING, Integer.toString(config.videoBfiDarkFrames));
+        editor.putString(VIDEO_BFI_BRIGHTNESS_COMPENSATION_PREF_STRING, Integer.toString(config.videoBfiCompensationMode));
     }
 }

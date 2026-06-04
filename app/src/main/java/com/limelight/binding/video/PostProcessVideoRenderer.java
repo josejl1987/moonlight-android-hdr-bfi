@@ -64,6 +64,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private final LibretroHdrUniforms hdrUniforms = new LibretroHdrUniforms();
     private final ArtemisPostProcessExtensions artemis = new ArtemisPostProcessExtensions();
     private volatile Decision lastDecision;
+    private boolean lastHdrModeActive;
     private Choreographer choreographer;
     private final Choreographer.FrameCallback renderFrameCallback = this::onVsyncFrame;
 
@@ -214,6 +215,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                         choreographer = null;
                     }
                     releaseGl();
+                    notifyHdrModeChanged();
                 } finally {
                     done.countDown();
                 }
@@ -338,26 +340,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         refreshResolvedSettings(false);
 
-        // Clamp HDRMode against the actual EGL mode we got (may have fallen back).
-        String actualMode = eglContext.getActualMode();
-        boolean androidEglFallback = false;
-        if (!"scRGB".equals(actualMode) && !"HDR10".equals(actualMode)) {
-            hdrUniforms.hdrMode = LibretroHdrUniforms.HDR_MODE_OFF;
-            hdrUniforms.inverseTonemap = 0.0f;
-            hdrUniforms.hdr10 = 0.0f;
-            androidEglFallback = true;
-        } else if ("HDR10".equals(actualMode) && hdrUniforms.hdrMode != LibretroHdrUniforms.HDR_MODE_HDR10) {
-            // Surface is HDR10/PQ but the user didn't request HDR10 output —
-            // can't safely render SDR through a 10-bit PQ swapchain. Fall back.
-            hdrUniforms.hdrMode = LibretroHdrUniforms.HDR_MODE_OFF;
-            hdrUniforms.inverseTonemap = 0.0f;
-            hdrUniforms.hdr10 = 0.0f;
-            androidEglFallback = true;
-        } else if ("scRGB".equals(actualMode) && hdrUniforms.hdrMode == LibretroHdrUniforms.HDR_MODE_HDR10) {
-            // Requested HDR10 but the surface is scRGB (extension missing) —
-            // upgrade to plain scRGB output rather than dropping to OFF.
-            hdrUniforms.hdrMode = LibretroHdrUniforms.HDR_MODE_SCRGB;
-        }
+        // Force shader HDRMode to match the actual EGL surface. The surface's
+        // pixel format determines what encoding (PQ vs linear) it expects, so
+        // the shader branch must match regardless of the user's preference.
+        boolean androidEglFallback = hdrUniforms.hdrMode != hdrModeForActualEglMode();
+        setResolvedHdrMode(hdrModeForActualEglMode());
 
         // Initialize size uniforms. SourceSize is the decoded video frame;
         // OutputSize is the actual EGL window surface (which may differ after
@@ -384,8 +371,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 bfiScheduler.getDarkFrames(),
                 artemis.bfiBrightnessCompensation);
 
+        notifyHdrModeChanged();
+
         LimeLog.info("PostProcess: target=" + targetMode
-                + " actual=" + actualMode
+                + " actual=" + eglContext.getActualMode()
                 + " hdrMode=" + hdrUniforms.hdrMode);
 
         int[] textures = new int[1];
@@ -476,7 +465,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         if (initLatch != null) initLatch.countDown();
 
         LimeLog.info("PostProcess: GL initialized, starting render loop at " + displayRefreshRate + " Hz");
-        dispatchStatus(false);
+        publishStatus();
 
         choreographer.postFrameCallback(renderFrameCallback);
     }
@@ -601,7 +590,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         statsFrameCount++;
         if (statsFrameCount == 1 || statsFrameCount % 30 == 0) {
-            dispatchStatus(isBlack);
+            publishStatus();
         }
         if (statsFrameCount >= STATS_INTERVAL_FRAMES) {
             logStats();
@@ -711,7 +700,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         hasValidTextureFrame = false;
         recoveryFailed = false;
         LimeLog.info("PostProcess: GL released");
-        dispatchStatus(false);
+        publishStatus();
     }
 
     public void updateSettings() {
@@ -728,33 +717,13 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         int requestedHdrMode = hostHdrStreamActive
                 ? LibretroHdrUniforms.HDR_MODE_OFF
                 : prefConfig.videoHdrMode;
-        // Pass the requested mode through; HDR10 (1) and PQ_TO_SCRGB (3) flow
-        // through here. The actualMode clamp in initGl() will reduce non-scRGB
-        // EGL modes back to OFF; HDR10 output additionally needs G3 (EGL BT.2020
-        // PQ surface) which is not yet implemented.
-        hdrUniforms.hdrMode = requestedHdrMode;
 
         hdrUniforms.brightnessNits  = Math.max(80, prefConfig.videoHdrPaperWhiteNits);
         hdrUniforms.expandGamut     = clampGamut(prefConfig.videoHdrExpandGamut);
         hdrUniforms.subpixelLayout  = clampSubpixel(prefConfig.videoHdrSubpixelLayout);
         hdrUniforms.scanlines       = prefConfig.videoHdrScanlines ? 1.0f : 0.0f;
 
-        // The HDRMode uniform on the shader drives the branch selection.
-        // InverseTonemap and HDR10 flag uniforms correspond to the legacy
-        // "shader-input flags" path (used by the HDR10/PQ output branch and
-        // the non-HDRMode scanline path), so set them consistently with the
-        // resolved mode. PQ→scRGB (3) decodes via DecodeHDR10ToscRGB and does
-        // not use either flag.
-        if (hdrUniforms.hdrMode == LibretroHdrUniforms.HDR_MODE_HDR10) {
-            hdrUniforms.inverseTonemap = 1.0f;
-            hdrUniforms.hdr10          = 1.0f;
-        } else if (hdrUniforms.hdrMode == LibretroHdrUniforms.HDR_MODE_SCRGB) {
-            hdrUniforms.inverseTonemap = 1.0f;
-            hdrUniforms.hdr10          = 0.0f;
-        } else {
-            hdrUniforms.inverseTonemap = 0.0f;
-            hdrUniforms.hdr10          = 0.0f;
-        }
+        setResolvedHdrMode(requestedHdrMode);
 
         int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
         boolean bfiActive = prefConfig.videoBlackFrameInsertion
@@ -800,7 +769,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         lastDecision = decide(prefConfig, displayRefreshRate, hostHdrStreamActive);
-        dispatchStatus(bfiActive);
+        publishStatus();
+        notifyHdrModeChanged();
     }
 
     private static float computeVisibleBrightnessNits(float libretroBrightnessNits,
@@ -849,62 +819,34 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         return v;
     }
 
-    private void dispatchStatus(boolean blackFrameActive) {
-        if (statusListener == null) {
+    private void publishStatus() {
+        if (statusListener == null || eglContext == null) {
             return;
         }
-
         StringBuilder sb = new StringBuilder();
-        sb.append("PP: ");
-
+        sb.append("PP: ").append(eglContext.getActualMode());
+        String fbDesc = eglContext.getFramebufferFormatDescription();
+        if (fbDesc != null) {
+            sb.append(" | ").append(fbDesc);
+        }
+        sb.append(" | HDR=");
         switch (hdrUniforms.hdrMode) {
             case LibretroHdrUniforms.HDR_MODE_HDR10:
-                sb.append("HDR10 (PQ)");
-                break;
+                sb.append("HDR10"); break;
             case LibretroHdrUniforms.HDR_MODE_SCRGB:
-                sb.append("scRGB");
-                break;
+                sb.append("scRGB"); break;
             default:
-                sb.append("SDR");
-                break;
+                sb.append("OFF"); break;
         }
-
-        if (hdrUniforms.hdrMode != LibretroHdrUniforms.HDR_MODE_OFF) {
-            sb.append(" | ").append((int) hdrUniforms.brightnessNits).append(" nits");
-        }
-
+        sb.append(" ").append((int) hdrUniforms.brightnessNits).append("nits");
         if (bfiScheduler.isEnabled()) {
-            sb.append(" | BFI ").append(bfiScheduler.getDarkFrames()).append(" dark");
-            sb.append(" | cycle ").append(1 + bfiScheduler.getDarkFrames()).append(" refreshes");
-            sb.append(" | phase ").append(blackFrameActive ? "black" : "visible");
-            switch (prefConfig.videoBfiCompensationMode) {
-                case PreferenceConfiguration.BFI_COMP_CONSERVATIVE:
-                    float conservativeFactor = Math.min(1.0f + bfiScheduler.getDarkFrames(), 1.6f);
-                    sb.append(" | boost ").append(String.format(java.util.Locale.US, "%.2fx", conservativeFactor));
-                    break;
-                case PreferenceConfiguration.BFI_COMP_FULL:
-                    float fullFactor = 1.0f + bfiScheduler.getDarkFrames();
-                    sb.append(" | boost ").append(String.format(java.util.Locale.US, "%.2fx", fullFactor));
-                    break;
-                default:
-                    break;
-            }
+            sb.append(" | BFI=").append(bfiScheduler.getDarkFrames())
+              .append(", cycle=").append(1 + bfiScheduler.getDarkFrames());
         } else {
-            sb.append(" | BFI off");
+            sb.append(" | BFI=off");
         }
-
-        if (hostHdrStreamActive) {
-            sb.append(" | host HDR");
-        }
-
-        if (eglContext != null) {
-            sb.append(" | EGL: ").append(eglContext.getActualMode());
-            String fbDesc = eglContext.getFramebufferFormatDescription();
-            if (fbDesc != null) {
-                sb.append(" | FB: ").append(fbDesc);
-            }
-        }
-
+        sb.append(" | frames=").append(framesRendered)
+          .append(" skipped=").append(framesSkippedNoInput);
         statusListener.onPostProcessStatusUpdate(sb.toString());
     }
 
@@ -1283,5 +1225,42 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         GLES20.glDeleteShader(fragmentShader);
 
         return program;
+    }
+
+    private void setResolvedHdrMode(int mode) {
+        hdrUniforms.hdrMode = mode;
+        if (mode == LibretroHdrUniforms.HDR_MODE_HDR10) {
+            hdrUniforms.inverseTonemap = 1.0f;
+            hdrUniforms.hdr10          = 1.0f;
+        } else {
+            hdrUniforms.inverseTonemap = 0.0f;
+            hdrUniforms.hdr10          = 0.0f;
+        }
+    }
+
+    private int hdrModeForActualEglMode() {
+        if (eglContext == null) {
+            return LibretroHdrUniforms.HDR_MODE_OFF;
+        }
+        String mode = eglContext.getActualMode();
+        if ("HDR10".equals(mode)) {
+            return LibretroHdrUniforms.HDR_MODE_HDR10;
+        } else if ("scRGB".equals(mode)) {
+            return LibretroHdrUniforms.HDR_MODE_SCRGB;
+        } else {
+            return LibretroHdrUniforms.HDR_MODE_OFF;
+        }
+    }
+
+    private boolean isHdrModeActive() {
+        return hdrUniforms.hdrMode != LibretroHdrUniforms.HDR_MODE_OFF;
+    }
+
+    private void notifyHdrModeChanged() {
+        boolean active = isHdrModeActive();
+        if (active != lastHdrModeActive) {
+            lastHdrModeActive = active;
+            statusListener.onPostProcessHdrModeChanged(active);
+        }
     }
 }

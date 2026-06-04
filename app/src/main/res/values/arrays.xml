@@ -212,14 +212,15 @@
         <item>2</item>
     </string-array>
 
-    <!-- libretro video_hdr_mode enum (mirrors config.def.h).
-         HDR10 (1) is hidden until PQ/EGL BT.2020 is implemented. -->
+    <!-- libretro video_hdr_mode enum (mirrors config.def.h). -->
     <string-array name="video_hdr_mode_names">
         <item>@string/video_hdr_off</item>
+        <item>@string/video_hdr_hdr10</item>
         <item>@string/video_hdr_scrgb</item>
     </string-array>
     <string-array name="video_hdr_mode_values" translatable="false">
         <item>0</item>
+        <item>1</item>
         <item>2</item>
     </string-array>
 
