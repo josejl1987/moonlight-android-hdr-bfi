@@ -178,12 +178,12 @@ vec4 To2020(const vec4 sdr_linear)
 
 vec3 HDR(const vec3 sdr_linear)
 {
-   return InverseTonemap(sdr_linear, BrightnessNits, BrightnessNits);
+   return ApplyInverseTonemap(sdr_linear, BrightnessNits, BrightnessNits);
 }
 
 vec4 HDR(const vec4 sdr_linear)
 {
-   vec3 hdr_linear = InverseTonemap(sdr_linear.rgb, BrightnessNits, BrightnessNits);
+   vec3 hdr_linear = ApplyInverseTonemap(sdr_linear.rgb, BrightnessNits, BrightnessNits);
    return vec4(hdr_linear, sdr_linear.a);
 }
 
@@ -193,7 +193,7 @@ vec3 LinearToSignal(const vec3 linear_colour)
     return pow(max(linear_colour.rgb, vec3(0.0)), vec3(1.0 / 2.4));
 }
 
-vec3 HDR10(const vec3 hdr_linear)
+vec3 ApplyHDR10(const vec3 hdr_linear)
 {
    vec3 pq_input  = hdr_linear * vec3(BrightnessNits / kMaxNitsFor2084);
 
@@ -202,7 +202,7 @@ vec3 HDR10(const vec3 hdr_linear)
    return hdr10;
 }
 
-vec4 HDR10(const vec4 hdr_linear)
+vec4 ApplyHDR10(const vec4 hdr_linear)
 {
    vec3 pq_input  = hdr_linear.rgb * vec3(BrightnessNits / kMaxNitsFor2084);
 
@@ -394,7 +394,7 @@ void main()
        * Source is PQ-encoded Rec.2020 from the shader's output.
        * Decode PQ to linear, convert gamut to Rec.709, scale for scRGB. */
       vec4 pq = texture(Source, vTexCoord);
-      FragColor = vec4(HDR10ToscRGB(pq.rgb), pq.a);
+      FragColor = vec4(DecodeHDR10ToscRGB(pq.rgb), pq.a);
    }
    else if(HDRMode == 2)
    {
@@ -429,11 +429,11 @@ void main()
       if((Scanlines > 0.0) && (OutputSize.y > 240.0 * 4.0))
       {
          /* Scanlines() returns linear Rec.2020 with InverseTonemap and mask applied */
-         FragColor = vec4(HDR10(Scanlines(vTexCoord)), 1.0);
+          FragColor = vec4(ApplyHDR10(Scanlines(vTexCoord)), 1.0);
       }
       else
       {
-         FragColor = HDR10(HDR(To2020(Sample(kDefaultColor, vTexCoord))));
+          FragColor = ApplyHDR10(HDR(To2020(Sample(kDefaultColor, vTexCoord))));
       }
    }
    else if(InverseTonemap > 0.0)
@@ -442,7 +442,7 @@ void main()
    }
    else if(HDR10 > 0.0)
    {
-      FragColor = HDR10(To2020(Sample(kDefaultColor, vTexCoord)));
+      FragColor = ApplyHDR10(To2020(Sample(kDefaultColor, vTexCoord)));
    }
    else
    {

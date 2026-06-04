@@ -19,6 +19,7 @@ public final class PostProcessCapabilities {
     public final boolean supportsWideColor;
     public final boolean supportsScRgb;
     public final boolean supportsFp16;
+    public final boolean supportsHdr10;
     public final String selectedBackend;
     public final String selectedOutputMode;
     public final String disabledReason;
@@ -28,6 +29,7 @@ public final class PostProcessCapabilities {
             boolean supportsWideColor,
             boolean supportsScRgb,
             boolean supportsFp16,
+            boolean supportsHdr10,
             String selectedBackend,
             String selectedOutputMode,
             String disabledReason
@@ -36,6 +38,7 @@ public final class PostProcessCapabilities {
         this.supportsWideColor = supportsWideColor;
         this.supportsScRgb = supportsScRgb;
         this.supportsFp16 = supportsFp16;
+        this.supportsHdr10 = supportsHdr10;
         this.selectedBackend = selectedBackend;
         this.selectedOutputMode = selectedOutputMode;
         this.disabledReason = disabledReason;
@@ -46,13 +49,14 @@ public final class PostProcessCapabilities {
         boolean supportsWideColor = false;
         boolean supportsScRgb = false;
         boolean supportsFp16 = false;
+        boolean supportsHdr10 = false;
         String selectedBackend = "none";
         String selectedOutputMode = "SDR";
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             disabledReason = "Post-process renderer requires Android 8.0+";
             LimeLog.info("PostProcess: " + disabledReason);
-            return new PostProcessCapabilities(false, false, false, false, selectedBackend, selectedOutputMode, disabledReason);
+            return new PostProcessCapabilities(false, false, false, false, false, selectedBackend, selectedOutputMode, disabledReason);
         }
 
         if (window != null) {
@@ -71,13 +75,20 @@ public final class PostProcessCapabilities {
         boolean glesFp16 = eglInfo[1];
         boolean eglBt2020Linear = eglInfo[2];
         boolean eglDisplayP3 = eglInfo[3];
+        boolean eglBt2020Pq = eglInfo[4];
 
         supportsScRgb = eglScrgb && glesFp16 && supportsWideColor;
         supportsFp16 = glesFp16;
+        // HDR10/PQ EGL surface requires the colorspace extension; the display
+        // also needs to be HDR-capable (matches upstream's check on
+        // window/displays before creating a PQ surface).
+        supportsHdr10 = eglBt2020Pq && supportsWideColor;
 
         selectedBackend = "GL";
         if (supportsScRgb) {
             selectedOutputMode = "scRGB";
+        } else if (supportsHdr10) {
+            selectedOutputMode = "HDR10";
         } else if (eglDisplayP3 && supportsWideColor) {
             selectedOutputMode = "Display P3";
         } else {
@@ -89,13 +100,15 @@ public final class PostProcessCapabilities {
         LimeLog.info("PostProcess: wideColor=" + supportsWideColor
                 + " scRGB=" + supportsScRgb
                 + " FP16=" + supportsFp16
+                + " HDR10=" + supportsHdr10
                 + " EGL_scRGB=" + eglScrgb
                 + " GLES_FP16=" + glesFp16
-                + " EGL_BT2020=" + eglBt2020Linear
+                + " EGL_BT2020_PQ=" + eglBt2020Pq
+                + " EGL_BT2020_linear=" + eglBt2020Linear
                 + " EGL_P3=" + eglDisplayP3);
 
         return new PostProcessCapabilities(true, supportsWideColor, supportsScRgb,
-                supportsFp16, selectedBackend, selectedOutputMode, disabledReason);
+                supportsFp16, supportsHdr10, selectedBackend, selectedOutputMode, disabledReason);
     }
 
     private static boolean[] probeEglAndGles() {
@@ -103,15 +116,16 @@ public final class PostProcessCapabilities {
         boolean glesFp16 = false;
         boolean eglBt2020Linear = false;
         boolean eglDisplayP3 = false;
+        boolean eglBt2020Pq = false;
 
         EGLDisplay display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
         if (display == EGL14.EGL_NO_DISPLAY) {
-            return new boolean[]{false, false, false, false};
+            return new boolean[]{false, false, false, false, false};
         }
 
         int[] version = new int[2];
         if (!EGL14.eglInitialize(display, version, 0, version, 1)) {
-            return new boolean[]{false, false, false, false};
+            return new boolean[]{false, false, false, false, false};
         }
 
         try {
@@ -120,6 +134,7 @@ public final class PostProcessCapabilities {
                 eglScrgb = eglExt.contains("EGL_EXT_gl_colorspace_scrgb_linear");
                 eglBt2020Linear = eglExt.contains("EGL_EXT_gl_colorspace_bt2020_linear");
                 eglDisplayP3 = eglExt.contains("EGL_EXT_gl_colorspace_display_p3_passthrough");
+                eglBt2020Pq = eglExt.contains("EGL_EXT_gl_colorspace_bt2020_pq");
             }
 
             int[] configAttribs = {
@@ -168,6 +183,6 @@ public final class PostProcessCapabilities {
             EGL14.eglTerminate(display);
         }
 
-        return new boolean[]{eglScrgb, glesFp16, eglBt2020Linear, eglDisplayP3};
+        return new boolean[]{eglScrgb, glesFp16, eglBt2020Linear, eglDisplayP3, eglBt2020Pq};
     }
 }

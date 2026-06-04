@@ -10,10 +10,12 @@
 in vec4 aPosition;
 in vec2 aTexCoord;
 
+uniform mat4 MVP;
+
 out vec2 vTexCoord;
 
 void main()
 {
-   gl_Position = aPosition;
+   gl_Position = MVP * aPosition;
    vTexCoord   = aTexCoord;
 }

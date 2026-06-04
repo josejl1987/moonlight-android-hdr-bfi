@@ -32,7 +32,7 @@ const vec3 k709LumaCoeff = vec3(0.2126, 0.7152, 0.0722);
 /* Expanded Rec BT.709 luma coefficients - obtained by linear transformation + normalization */
 const vec3 kExpanded709LumaCoeff = vec3(0.215796, 0.702694, 0.120968);
 
-vec3 InverseTonemap(const vec3 sdr_linear, const float max_nits, const float paper_white_nits)
+vec3 ApplyInverseTonemap(const vec3 sdr_linear, const float max_nits, const float paper_white_nits)
 {
    float input_val = max(sdr_linear.r, max(sdr_linear.g, sdr_linear.b));
 
@@ -142,7 +142,7 @@ vec3 CalcHDRSceneValue(vec3 nits)
 }
 
 /* Converts a non-linear HDR10 value in the BT. 2020 colorspace to a linear HDR value in the Rec. 709 colorspace */
-vec3 HDR10ToLinear(vec3 hdr10)
+vec3 DecodeHDR10ToLinear(vec3 hdr10)
 {
    vec3 normalizedLinear = ST2084ToLinear(hdr10);
    vec3 rec2020 = CalcHDRSceneValue(normalizedLinear);
@@ -159,7 +159,7 @@ vec3 HDR10ToLinear(vec3 hdr10)
 /* Converts a non-linear HDR10 PQ value in the BT. 2020 colorspace to scRGB linear.
  * scRGB uses Rec.709 primaries with 1.0 = 80 nits.
  * HDR10 PQ: 1.0 normalised linear = 10,000 nits, so scalar = 10000/80 = 125. */
-vec3 HDR10ToscRGB(vec3 hdr10Color)
+vec3 DecodeHDR10ToscRGB(vec3 hdr10Color)
 {
    vec3 linear10k = ST2084ToLinear(hdr10Color);
    vec3 linear709 = linear10k * k2020to709;

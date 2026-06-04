@@ -1083,7 +1083,7 @@ private static int getFramePacingValue(Context context) {
             config.videoHdrPaperWhiteNits = 80;
         }
         config.videoHdrExpandGamut = getIntPref(prefs, VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT);
-        if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_EXPANDED) {
+        if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_SUPER) {
             config.videoHdrExpandGamut = HDR_GAMUT_ACCURATE;
         }
         config.videoHdrScanlines = prefs.getBoolean(VIDEO_HDR_SCANLINES_PREF_STRING, DEFAULT_VIDEO_HDR_SCANLINES);

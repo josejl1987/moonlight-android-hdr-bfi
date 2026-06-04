@@ -147,6 +147,42 @@ public final class EglPostProcessContext {
         return extColorspaceScrgbLinear;
     }
 
+    public boolean supportsHdr10() {
+        return extColorspaceBt2020Pq;
+    }
+
+    /**
+     * Returns the current EGL window surface width, or 0 if the surface is
+     * not yet created or the query fails. The width reflects the actual
+     * surface dimensions at the time of the call, including any
+     * letterbox/scale applied by the system.
+     */
+    public int getSurfaceWidth() {
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY || eglSurface == EGL14.EGL_NO_SURFACE) {
+            return 0;
+        }
+        int[] value = new int[1];
+        if (!EGL14.eglQuerySurface(eglDisplay, eglSurface, EGL14.EGL_WIDTH, value, 0)) {
+            return 0;
+        }
+        return value[0];
+    }
+
+    /**
+     * Returns the current EGL window surface height, or 0 if the surface is
+     * not yet created or the query fails.
+     */
+    public int getSurfaceHeight() {
+        if (eglDisplay == EGL14.EGL_NO_DISPLAY || eglSurface == EGL14.EGL_NO_SURFACE) {
+            return 0;
+        }
+        int[] value = new int[1];
+        if (!EGL14.eglQuerySurface(eglDisplay, eglSurface, EGL14.EGL_HEIGHT, value, 0)) {
+            return 0;
+        }
+        return value[0];
+    }
+
     private void probeExtensions() {
         String eglExtensions;
         try {
@@ -183,6 +219,19 @@ public final class EglPostProcessContext {
                 };
                 renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
                 allow8bitFallback = true;
+                break;
+            case "HDR10":
+                if (!extColorspaceBt2020Pq) return null;
+                // RGB10A2 PQ surface: 10 bits per channel, 2-bit alpha (RGBA1010102).
+                // The OS treats the swapchain as a PQ HDR10 framebuffer when
+                // EGL_GL_COLORSPACE_BT2020_PQ_EXT is selected below.
+                baseAttribs = new int[] {
+                        EGL14.EGL_RED_SIZE, 10,
+                        EGL14.EGL_GREEN_SIZE, 10,
+                        EGL14.EGL_BLUE_SIZE, 10,
+                        EGL14.EGL_ALPHA_SIZE, 2
+                };
+                renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
                 break;
             case "Display P3":
                 if (!extColorspaceDisplayP3) return null;
@@ -276,12 +325,14 @@ public final class EglPostProcessContext {
         GLES30.glGetIntegerv(GLES30.GL_ALPHA_BITS, alpha, 0);
         int totalBits = red[0] + green[0] + blue[0] + alpha[0];
         String format;
-        if (totalBits == 64) {
+        if (red[0] == 16 && green[0] == 16 && blue[0] == 16) {
             format = "FP16";
-        } else if (totalBits == 32) {
-            format = "RGBA8";
-        } else if (totalBits == 48) {
+        } else if (red[0] == 10 && green[0] == 10 && blue[0] == 10) {
+            format = "RGB10A2";
+        } else if (red[0] == 16 && green[0] == 16) {
             format = "RGB16";
+        } else if (red[0] == 8 && green[0] == 8 && blue[0] == 8) {
+            format = totalBits == 32 ? "RGBA8" : "RGB8";
         } else {
             format = "unknown";
         }
@@ -352,6 +403,9 @@ public final class EglPostProcessContext {
             case "scRGB":
                 colorspaceValue = EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT;
                 break;
+            case "HDR10":
+                colorspaceValue = EGL_GL_COLORSPACE_BT2020_PQ_EXT;
+                break;
             case "Display P3":
                 colorspaceValue = EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT;
                 break;
@@ -397,6 +451,8 @@ public final class EglPostProcessContext {
 
     private static String nextFallback(String mode) {
         switch (mode) {
+            case "HDR10":
+                return "scRGB";
             case "scRGB":
                 return "Display P3";
             case "Display P3":

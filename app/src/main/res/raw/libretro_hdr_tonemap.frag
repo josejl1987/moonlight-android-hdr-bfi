@@ -46,7 +46,7 @@ void main()
    {
       /* HDR10 PQ: decode PQ -> linear BT.709, then inverse-of-inverse-tonemap
        * back down to SDR linear using the same paper_white the forward pass used. */
-      vec3 hdr_linear = HDR10ToLinear(source.rgb);
+      vec3 hdr_linear = DecodeHDR10ToLinear(source.rgb);
       sdr_linear      = Tonemap(hdr_linear,
                                 BrightnessNits,
                                 BrightnessNits);

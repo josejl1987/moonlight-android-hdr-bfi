@@ -889,12 +889,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 Surface renderSurface = streamContainer.getSurface();
 
-                if (PostProcessVideoRenderer.shouldUse(
-                        Game.this,
-                        renderSurface,
-                        prefConfig,
-                        displayRefreshRate,
-                        finalWillStreamHdr)) {
+                PostProcessVideoRenderer.Decision ppDecision =
+                        PostProcessVideoRenderer.decide(
+                                prefConfig,
+                                displayRefreshRate,
+                                finalWillStreamHdr);
+
+                if (ppDecision.enabled) {
                     try {
                         postProcessRenderer = new PostProcessVideoRenderer(
                                 Game.this,
@@ -928,21 +929,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         showPostProcessOverlay(false);
                     }
                 } else {
-                    if (prefConfig.videoBlackFrameInsertion) {
-                        float required = prefConfig.fps * (1.0f + Math.max(1, prefConfig.videoBfiDarkFrames));
-                        boolean bfiUseful = Math.abs(displayRefreshRate - required) <= 3.0f;
-                        if (!bfiUseful) {
-                            Toast.makeText(Game.this,
-                                    "BFI requires ~" + (int)(required) + " Hz display (current: "
-                                            + (int)displayRefreshRate + " Hz)", Toast.LENGTH_LONG).show();
-                        }
-                    }
-                    if (prefConfig.videoHdrMode != 0 && !finalWillStreamHdr
-                            && prefConfig.postProcessRendererMode == 0) {
-                        Toast.makeText(Game.this,
-                                "Enable Post-process renderer (Auto/Force) to use HDR/ BFI",
-                                Toast.LENGTH_LONG).show();
-                    }
+                    Toast.makeText(Game.this, ppDecision.reason, Toast.LENGTH_LONG).show();
                     decoderRenderer.setRenderTarget(renderSurface);
                     showPostProcessOverlay(false);
                 }
@@ -1865,8 +1852,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         if (postProcessRenderer != null) {
-            postProcessRenderer.stop();
+            postProcessRenderer.release();
+            postProcessRenderer = null;
         }
+        showPostProcessOverlay(false);
 
         if (conn != null) {
             int videoFormat = decoderRenderer.getActiveVideoFormat();
@@ -4049,10 +4038,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     public void showPostProcessQuickPanel() {
-        if (postProcessRenderer == null) {
-            Toast.makeText(this, "Post-process renderer is not active", Toast.LENGTH_SHORT).show();
-            return;
-        }
+        // Always allow the panel so the user can adjust settings, even if
+        // the renderer is inactive (init failed, currently stopped, etc.).
+        // Settings are persisted and applied on the next connection.
         ScrollView scrollView = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -4104,7 +4092,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 new String[]{"Off", "Conservative", "Full"},
                 new int[]{0, 1, 2},
                 prefConfig.videoBfiCompensationMode);
-        root.addView(compSpinner);
 
         updateBrightnessLabel(brightnessLabel, brightnessValues[brightnessSeek.getProgress()]);
 
@@ -4207,7 +4194,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         editor.apply();
 
         if (postProcessRenderer != null) {
-            postProcessRenderer.updateSettings(prefConfig);
+            postProcessRenderer.updateSettings();
             showPostProcessOverlay(true);
         }
     }
@@ -4479,6 +4466,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     private void showPostProcessOverlay(boolean visible) {
         if (postProcessOverlayView == null) {
+            return;
+        }
+
+        if (visible && isHidingOverlays) {
             return;
         }
 

@@ -1,19 +1,22 @@
 package com.limelight.binding.video;
 
 /**
- * Uniform block shape for the libretro HDR composite pipeline.
+ * libretro HDR uniform struct — the resolved state uploaded to the GLSL
+ * composite and tonemap shaders. Mirrors the UBO defined in
+ * {@code res/raw/libretro_hdr_common.glsl}, which is a port of RetroArch's
+ * {@code gfx/drivers/vulkan_shaders/hdr_common.glsl}.
  *
- * <p>This class mirrors the UBO defined in
- * {@code res/raw/libretro_hdr_common.glsl}, which is in turn a port of
- * RetroArch's {@code gfx/drivers/vulkan_shaders/hdr_common.glsl}. The field
- * names are intentionally short to keep call sites readable; the renderer is
- * responsible for mapping them onto the matching GLSL uniforms.</p>
+ * <p>Field names match the libretro spec exactly so call sites stay readable;
+ * the renderer is responsible for mapping them onto the matching GLSL
+ * uniforms. Defaults follow RetroArch's own defaults as documented in
+ * {@code config.def.h} for {@code video_hdr_mode},
+ * {@code video_hdr_paper_white_nits}, and {@code video_hdr_expand_gamut}.</p>
  *
- * <p>Defaults follow RetroArch's own defaults as documented in
- * {@code config.def.h} for {@code video_hdr_mode}, {@code video_hdr_paper_white_nits},
- * and {@code video_hdr_expand_gamut}. Scanlines defaults to {@code 0} on
- * Artemis because the CRT-mask branch is not yet wired up; flip it on once
- * a deliberate CRT-shader path is introduced.</p>
+ * <p>This struct holds <em>libretro state only</em>. Artemis-specific
+ * post-process extensions (BFI brightness compensation, force post-process
+ * enable, EGL fallback tracking) live in
+ * {@link ArtemisPostProcessExtensions} so the libretro math stays
+ * untouched.</p>
  */
 public final class LibretroHdrUniforms {
     public static final int HDR_MODE_OFF         = 0;
