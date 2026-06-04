@@ -5,6 +5,7 @@ import android.opengl.EGLConfig;
 import android.opengl.EGLContext;
 import android.opengl.EGLDisplay;
 import android.opengl.EGLSurface;
+import android.opengl.GLES30;
 import android.view.Surface;
 
 import com.limelight.LimeLog;
@@ -69,6 +70,7 @@ public final class EglPostProcessContext {
                         actualMode = mode;
                         actualGlEsVersion = glEsVersion;
                         initialized = true;
+                        logSurfaceFormat();
                         LimeLog.info("PostProcess: EGL initialized in " + actualMode + " mode (GL ES " + glEsVersion + ")");
                         return true;
                     }
@@ -229,6 +231,65 @@ public final class EglPostProcessContext {
         LimeLog.info("PostProcess: EGL config R=" + red + " G=" + green + " B=" + blue
                 + " A=" + alpha + " D=" + depth + " visual=0x" + Integer.toHexString(visualId)
                 + " caveat=" + caveatStr);
+    }
+
+    private void logSurfaceFormat() {
+        int[] red = new int[1];
+        int[] green = new int[1];
+        int[] blue = new int[1];
+        int[] alpha = new int[1];
+        GLES30.glGetIntegerv(GLES30.GL_RED_BITS, red, 0);
+        GLES30.glGetIntegerv(GLES30.GL_GREEN_BITS, green, 0);
+        GLES30.glGetIntegerv(GLES30.GL_BLUE_BITS, blue, 0);
+        GLES30.glGetIntegerv(GLES30.GL_ALPHA_BITS, alpha, 0);
+        int totalBits = red[0] + green[0] + blue[0] + alpha[0];
+        String format;
+        if (totalBits == 64) {
+            format = "FP16 (scRGB likely)";
+        } else if (totalBits == 32) {
+            format = "RGBA8 (SDR)";
+        } else if (totalBits == 48) {
+            format = "RGB16 (FP16 no alpha)";
+        } else {
+            format = "unknown";
+        }
+        LimeLog.info("PostProcess: framebuffer format R=" + red[0] + " G=" + green[0] + " B=" + blue[0]
+                + " A=" + alpha[0] + " total=" + totalBits + " -> " + format);
+
+        // Query colorspace attribute from the EGL surface
+        int[] colorspace = new int[1];
+        if (EGL14.eglQuerySurface(eglDisplay, eglSurface, EGL_GL_COLORSPACE_KHR, colorspace, 0)) {
+            String csName;
+            switch (colorspace[0]) {
+                case EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT:
+                    csName = "scRGB_linear";
+                    break;
+                case EGL_GL_COLORSPACE_SCRGB_EXT:
+                    csName = "scRGB";
+                    break;
+                case EGL_GL_COLORSPACE_BT2020_PQ_EXT:
+                    csName = "BT2020_PQ";
+                    break;
+                case EGL_GL_COLORSPACE_BT2020_LINEAR_EXT:
+                    csName = "BT2020_linear";
+                    break;
+                case EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT:
+                    csName = "Display_P3";
+                    break;
+                case EGL_GL_COLORSPACE_SRGB_KHR:
+                    csName = "sRGB";
+                    break;
+                case EGL_GL_COLORSPACE_LINEAR_KHR:
+                    csName = "linear";
+                    break;
+                default:
+                    csName = "0x" + Integer.toHexString(colorspace[0]);
+                    break;
+            }
+            LimeLog.info("PostProcess: EGL surface colorspace=" + csName);
+        } else {
+            LimeLog.info("PostProcess: EGL surface colorspace query failed");
+        }
     }
 
     private boolean createContext(EGLConfig config, int glEsVersion) {
