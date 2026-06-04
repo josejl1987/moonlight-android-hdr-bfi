@@ -6,6 +6,7 @@ import android.opengl.EGLContext;
 import android.opengl.EGLDisplay;
 import android.opengl.EGLSurface;
 import android.opengl.GLES30;
+import android.util.Log;
 import android.view.Surface;
 
 import com.limelight.LimeLog;
@@ -48,12 +49,14 @@ public final class EglPostProcessContext {
         eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
         if (eglDisplay == EGL14.EGL_NO_DISPLAY) {
             LimeLog.warning("PostProcess: eglGetDisplay failed");
+            Log.d("PostProcess", "eglGetDisplay failed");
             return false;
         }
 
         int[] version = new int[2];
         if (!EGL14.eglInitialize(eglDisplay, version, 0, version, 1)) {
             LimeLog.warning("PostProcess: eglInitialize failed");
+            Log.d("PostProcess", "eglInitialize failed");
             return false;
         }
 
@@ -71,7 +74,9 @@ public final class EglPostProcessContext {
                         actualGlEsVersion = glEsVersion;
                         initialized = true;
                         logSurfaceFormat();
-                        LimeLog.info("PostProcess: EGL initialized in " + actualMode + " mode (GL ES " + glEsVersion + ")");
+                        String msg = "PostProcess: EGL initialized in " + actualMode + " mode (GL ES " + glEsVersion + ")";
+                        LimeLog.info(msg);
+                        Log.d("PostProcess", msg);
                         return true;
                     }
                     destroySurface();
@@ -81,10 +86,13 @@ public final class EglPostProcessContext {
             mode = nextFallback(mode);
             if (mode == null) {
                 LimeLog.warning("PostProcess: all EGL configs failed");
+                Log.d("PostProcess", "all EGL configs failed");
                 release();
                 return false;
             }
-            LimeLog.info("PostProcess: falling back to " + mode);
+            String fbMsg = "PostProcess: falling back to " + mode;
+            LimeLog.info(fbMsg);
+            Log.d("PostProcess", fbMsg);
         }
     }
 
@@ -253,8 +261,10 @@ public final class EglPostProcessContext {
         } else {
             format = "unknown";
         }
-        LimeLog.info("PostProcess: framebuffer format R=" + red[0] + " G=" + green[0] + " B=" + blue[0]
-                + " A=" + alpha[0] + " total=" + totalBits + " -> " + format);
+        String fbMsg = "PostProcess: framebuffer format R=" + red[0] + " G=" + green[0] + " B=" + blue[0]
+                + " A=" + alpha[0] + " total=" + totalBits + " -> " + format;
+        LimeLog.info(fbMsg);
+        Log.d("PostProcess", fbMsg);
 
         // Query colorspace attribute from the EGL surface
         int[] colorspace = new int[1];
@@ -286,9 +296,13 @@ public final class EglPostProcessContext {
                     csName = "0x" + Integer.toHexString(colorspace[0]);
                     break;
             }
-            LimeLog.info("PostProcess: EGL surface colorspace=" + csName);
+            String csMsg = "PostProcess: EGL surface colorspace=" + csName;
+            LimeLog.info(csMsg);
+            Log.d("PostProcess", csMsg);
         } else {
-            LimeLog.info("PostProcess: EGL surface colorspace query failed");
+            String csMsg = "PostProcess: EGL surface colorspace query failed";
+            LimeLog.info(csMsg);
+            Log.d("PostProcess", csMsg);
         }
     }
 
