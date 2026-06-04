@@ -8,8 +8,8 @@ package com.limelight.binding.video;
  * refreshes, so the full cycle length is {@code 1 + darkFrames}. On 120 Hz
  * with one dark frame that gives visible / black / visible / black. The
  * BFI brightness-compensation trick lives in the renderer, not here: the
- * renderer simply multiplies the visible-phase {@code BrightnessNits} uniform
- * by {@code 1 + darkFrames} so the libretro shader math stays untouched.</p>
+ * renderer keeps the shader uniform raw and only adjusts the reported visible
+ * brightness for status/logging.</p>
  */
 public final class BfiScheduler {
     private boolean enabled;

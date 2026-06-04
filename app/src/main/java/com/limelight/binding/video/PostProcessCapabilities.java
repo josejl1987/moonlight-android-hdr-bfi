@@ -15,6 +15,9 @@ import android.view.Window;
 import com.limelight.LimeLog;
 
 public final class PostProcessCapabilities {
+    private static final int EGL_COLOR_COMPONENT_TYPE_EXT = 0x3339;
+    private static final int EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT = 0x333B;
+
     public final boolean supportsPostProcess;
     public final boolean supportsWideColor;
     public final boolean supportsScRgb;
@@ -73,16 +76,18 @@ public final class PostProcessCapabilities {
         boolean[] eglInfo = probeEglAndGles();
         boolean eglScrgb = eglInfo[0];
         boolean glesFp16 = eglInfo[1];
-        boolean eglBt2020Linear = eglInfo[2];
-        boolean eglDisplayP3 = eglInfo[3];
-        boolean eglBt2020Pq = eglInfo[4];
+        boolean eglPixelFormatFloat = eglInfo[2];
+        boolean eglBt2020Linear = eglInfo[3];
+        boolean eglDisplayP3 = eglInfo[4];
+        boolean eglBt2020Pq = eglInfo[5];
+        boolean displayHdr10 = supportsHdr10Display(display);
 
-        supportsScRgb = eglScrgb && glesFp16 && supportsWideColor;
         supportsFp16 = glesFp16;
+        supportsScRgb = eglScrgb && eglPixelFormatFloat && supportsFp16 && supportsWideColor;
         // HDR10/PQ EGL surface requires the colorspace extension; the display
         // also needs to be HDR-capable (matches upstream's check on
         // window/displays before creating a PQ surface).
-        supportsHdr10 = eglBt2020Pq && supportsWideColor;
+        supportsHdr10 = eglBt2020Pq && supportsWideColor && displayHdr10;
 
         selectedBackend = "GL";
         if (supportsScRgb) {
@@ -101,8 +106,10 @@ public final class PostProcessCapabilities {
                 + " scRGB=" + supportsScRgb
                 + " FP16=" + supportsFp16
                 + " HDR10=" + supportsHdr10
+                + " displayHdr10=" + displayHdr10
                 + " EGL_scRGB=" + eglScrgb
-                + " GLES_FP16=" + glesFp16
+                + " EGL_pixelFormatFloat=" + eglPixelFormatFloat
+                + " windowFp16=" + glesFp16
                 + " EGL_BT2020_PQ=" + eglBt2020Pq
                 + " EGL_BT2020_linear=" + eglBt2020Linear
                 + " EGL_P3=" + eglDisplayP3);
@@ -114,27 +121,47 @@ public final class PostProcessCapabilities {
     private static boolean[] probeEglAndGles() {
         boolean eglScrgb = false;
         boolean glesFp16 = false;
+        boolean eglPixelFormatFloat = false;
         boolean eglBt2020Linear = false;
         boolean eglDisplayP3 = false;
         boolean eglBt2020Pq = false;
+        boolean windowFloatConfig = false;
 
         EGLDisplay display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
         if (display == EGL14.EGL_NO_DISPLAY) {
-            return new boolean[]{false, false, false, false, false};
+            return new boolean[]{false, false, false, false, false, false};
         }
 
         int[] version = new int[2];
         if (!EGL14.eglInitialize(display, version, 0, version, 1)) {
-            return new boolean[]{false, false, false, false, false};
+            return new boolean[]{false, false, false, false, false, false};
         }
 
         try {
             String eglExt = EGL14.eglQueryString(display, 0x3055);
             if (eglExt != null) {
                 eglScrgb = eglExt.contains("EGL_EXT_gl_colorspace_scrgb_linear");
+                eglPixelFormatFloat = eglExt.contains("EGL_EXT_pixel_format_float");
                 eglBt2020Linear = eglExt.contains("EGL_EXT_gl_colorspace_bt2020_linear");
                 eglDisplayP3 = eglExt.contains("EGL_EXT_gl_colorspace_display_p3_passthrough");
                 eglBt2020Pq = eglExt.contains("EGL_EXT_gl_colorspace_bt2020_pq");
+            }
+
+            if (eglPixelFormatFloat) {
+                int[] floatConfigAttribs = {
+                        EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                        EGL14.EGL_RED_SIZE, 16,
+                        EGL14.EGL_GREEN_SIZE, 16,
+                        EGL14.EGL_BLUE_SIZE, 16,
+                        EGL14.EGL_ALPHA_SIZE, 16,
+                        EGL_COLOR_COMPONENT_TYPE_EXT, EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT,
+                        EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT,
+                        EGL14.EGL_NONE
+                };
+                EGLConfig[] floatConfigs = new EGLConfig[1];
+                int[] floatNumConfigs = new int[1];
+                windowFloatConfig = EGL14.eglChooseConfig(display, floatConfigAttribs, 0,
+                        floatConfigs, 0, 1, floatNumConfigs, 0) && floatNumConfigs[0] > 0;
             }
 
             int[] configAttribs = {
@@ -183,6 +210,28 @@ public final class PostProcessCapabilities {
             EGL14.eglTerminate(display);
         }
 
-        return new boolean[]{eglScrgb, glesFp16, eglBt2020Linear, eglDisplayP3, eglBt2020Pq};
+        glesFp16 = glesFp16 && windowFloatConfig;
+
+        return new boolean[]{eglScrgb, glesFp16, eglPixelFormatFloat, eglBt2020Linear, eglDisplayP3, eglBt2020Pq};
+    }
+
+    private static boolean supportsHdr10Display(Display display) {
+        if (display == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            return false;
+        }
+        try {
+            Display.HdrCapabilities hdrCapabilities = display.getHdrCapabilities();
+            if (hdrCapabilities == null) {
+                return false;
+            }
+            for (int type : hdrCapabilities.getSupportedHdrTypes()) {
+                if (type == Display.HdrCapabilities.HDR_TYPE_HDR10) {
+                    return true;
+                }
+            }
+        } catch (Throwable t) {
+            LimeLog.warning("PostProcess: HDR capability probe failed: " + t.getMessage());
+        }
+        return false;
     }
 }

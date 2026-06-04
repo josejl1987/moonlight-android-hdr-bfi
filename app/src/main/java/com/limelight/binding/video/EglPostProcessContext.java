@@ -12,7 +12,6 @@ import android.view.Surface;
 import com.limelight.LimeLog;
 
 public final class EglPostProcessContext {
-    private static final int EGL_RECORDABLE_ANDROID = 0x3142;
     private static final int EGL_GL_COLORSPACE_KHR = 0x309D;
     private static final int EGL_GL_COLORSPACE_SRGB_KHR = 0x3089;
     private static final int EGL_GL_COLORSPACE_LINEAR_KHR = 0x308A;
@@ -23,6 +22,9 @@ public final class EglPostProcessContext {
     private static final int EGL_GL_COLORSPACE_DISPLAY_P3_EXT = 0x3363;
     private static final int EGL_GL_COLORSPACE_DISPLAY_P3_LINEAR_EXT = 0x3362;
     private static final int EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT = 0x3490;
+    private static final int EGL_COLOR_COMPONENT_TYPE_EXT = 0x3339;
+    private static final int EGL_COLOR_COMPONENT_TYPE_FIXED_EXT = 0x333A;
+    private static final int EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT = 0x333B;
 
     private static final int EGL_OPENGL_ES3_BIT = 0x0040;
 
@@ -35,8 +37,10 @@ public final class EglPostProcessContext {
     private int actualGlEsVersion;
     private boolean initialized;
     private String framebufferFormatDescription;
+    private EGLConfig eglConfig;
 
     private boolean extColorspaceScrgbLinear;
+    private boolean extPixelFormatFloat;
     private boolean extColorspaceBt2020Pq;
     private boolean extColorspaceBt2020Linear;
     private boolean extColorspaceDisplayP3;
@@ -70,6 +74,7 @@ public final class EglPostProcessContext {
             if (config == null) {
                 continue;
             }
+            eglConfig = config;
             if (createContext(config, 3) && createSurface(config, mode)) {
                 if (EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
                     actualMode = mode;
@@ -120,6 +125,7 @@ public final class EglPostProcessContext {
             EGL14.eglTerminate(eglDisplay);
             eglDisplay = EGL14.EGL_NO_DISPLAY;
         }
+        eglConfig = null;
         initialized = false;
     }
 
@@ -189,11 +195,13 @@ public final class EglPostProcessContext {
         if (eglExtensions == null) eglExtensions = "";
 
         extColorspaceScrgbLinear = eglExtensions.contains("EGL_EXT_gl_colorspace_scrgb_linear");
+        extPixelFormatFloat = eglExtensions.contains("EGL_EXT_pixel_format_float");
         extColorspaceBt2020Pq = eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_pq");
         extColorspaceBt2020Linear = eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_linear");
         extColorspaceDisplayP3 = eglExtensions.contains("EGL_EXT_gl_colorspace_display_p3_passthrough");
 
         LimeLog.info("PostProcess: EGL ext scRGB_linear=" + extColorspaceScrgbLinear
+                + " pixelFormatFloat=" + extPixelFormatFloat
                 + " BT2020_PQ=" + extColorspaceBt2020Pq
                 + " BT2020_linear=" + extColorspaceBt2020Linear
                 + " DisplayP3=" + extColorspaceDisplayP3);
@@ -205,12 +213,13 @@ public final class EglPostProcessContext {
 
         switch (mode) {
             case "scRGB":
-                if (!extColorspaceScrgbLinear) return null;
+                if (!extColorspaceScrgbLinear || !extPixelFormatFloat) return null;
                 baseAttribs = new int[] {
                         EGL14.EGL_RED_SIZE, 16,
                         EGL14.EGL_GREEN_SIZE, 16,
                         EGL14.EGL_BLUE_SIZE, 16,
-                        EGL14.EGL_ALPHA_SIZE, 16
+                        EGL14.EGL_ALPHA_SIZE, 16,
+                        EGL_COLOR_COMPONENT_TYPE_EXT, EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT
                 };
                 renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
                 break;
@@ -252,16 +261,16 @@ public final class EglPostProcessContext {
     }
 
     private EGLConfig tryConfig(int[] baseAttribs, int renderableType) {
-        int[] configAttribs = {
-                EGL14.EGL_RENDERABLE_TYPE, renderableType,
-                baseAttribs[0], baseAttribs[1],
-                baseAttribs[2], baseAttribs[3],
-                baseAttribs[4], baseAttribs[5],
-                baseAttribs[6], baseAttribs[7],
-                EGL14.EGL_SURFACE_TYPE, EGL14.EGL_WINDOW_BIT,
-                EGL_RECORDABLE_ANDROID, 1,
-                EGL14.EGL_NONE
-        };
+        int[] configAttribs = new int[baseAttribs.length + 7];
+        int i = 0;
+        configAttribs[i++] = EGL14.EGL_RENDERABLE_TYPE;
+        configAttribs[i++] = renderableType;
+        for (int attr : baseAttribs) {
+            configAttribs[i++] = attr;
+        }
+        configAttribs[i++] = EGL14.EGL_SURFACE_TYPE;
+        configAttribs[i++] = EGL14.EGL_WINDOW_BIT;
+        configAttribs[i] = EGL14.EGL_NONE;
 
         EGLConfig[] configs = new EGLConfig[1];
         int[] numConfigs = new int[1];
@@ -285,6 +294,8 @@ public final class EglPostProcessContext {
         int alpha = value[0];
         EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_DEPTH_SIZE, value, 0);
         int depth = value[0];
+        EGL14.eglGetConfigAttrib(eglDisplay, config, EGL_COLOR_COMPONENT_TYPE_EXT, value, 0);
+        int componentType = value[0];
         EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_NATIVE_VISUAL_ID, value, 0);
         int visualId = value[0];
         EGL14.eglGetConfigAttrib(eglDisplay, config, EGL14.EGL_CONFIG_CAVEAT, value, 0);
@@ -292,6 +303,7 @@ public final class EglPostProcessContext {
         String caveatStr = caveat == EGL14.EGL_NONE ? "none" : (caveat == EGL14.EGL_SLOW_CONFIG ? "slow" : "unknown");
         LimeLog.info("PostProcess: EGL config R=" + red + " G=" + green + " B=" + blue
                 + " A=" + alpha + " D=" + depth + " visual=0x" + Integer.toHexString(visualId)
+                + " componentType=" + componentTypeName(componentType)
                 + " caveat=" + caveatStr);
     }
 
@@ -305,11 +317,20 @@ public final class EglPostProcessContext {
         GLES30.glGetIntegerv(GLES30.GL_BLUE_BITS, blue, 0);
         GLES30.glGetIntegerv(GLES30.GL_ALPHA_BITS, alpha, 0);
         int totalBits = red[0] + green[0] + blue[0] + alpha[0];
+        int componentType = EGL_COLOR_COMPONENT_TYPE_FIXED_EXT;
+        if (eglConfig != null) {
+            int[] value = new int[1];
+            if (EGL14.eglGetConfigAttrib(eglDisplay, eglConfig, EGL_COLOR_COMPONENT_TYPE_EXT, value, 0)) {
+                componentType = value[0];
+            }
+        }
         String format;
-        if (red[0] == 16 && green[0] == 16 && blue[0] == 16) {
-            format = "FP16";
+        if (componentType == EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT && red[0] == 16 && green[0] == 16 && blue[0] == 16) {
+            format = "RGBA16_FLOAT / FP16";
         } else if (red[0] == 10 && green[0] == 10 && blue[0] == 10) {
             format = "RGB10A2";
+        } else if (componentType == EGL_COLOR_COMPONENT_TYPE_FIXED_EXT && red[0] == 16 && green[0] == 16 && blue[0] == 16) {
+            format = "RGBA16_FIXED";
         } else if (red[0] == 16 && green[0] == 16) {
             format = "RGB16";
         } else if (red[0] == 8 && green[0] == 8 && blue[0] == 8) {
@@ -319,7 +340,8 @@ public final class EglPostProcessContext {
         }
         framebufferFormatDescription = format;
         String fbMsg = "PostProcess: framebuffer format R=" + red[0] + " G=" + green[0] + " B=" + blue[0]
-                + " A=" + alpha[0] + " total=" + totalBits + " -> " + format;
+                + " A=" + alpha[0] + " total=" + totalBits + " componentType=" + componentTypeName(componentType)
+                + " -> " + format;
         LimeLog.info(fbMsg);
         Log.d("PostProcess", fbMsg);
 
@@ -433,13 +455,23 @@ public final class EglPostProcessContext {
     private static String[] fallbackChain(String requestedMode) {
         switch (requestedMode) {
             case "HDR10":
-                return new String[] {"HDR10", "scRGB", "Display P3", "SDR"};
+                return new String[] {"HDR10", "SDR"};
             case "scRGB":
-                return new String[] {"scRGB", "HDR10", "Display P3", "SDR"};
+                return new String[] {"scRGB", "SDR"};
             case "Display P3":
                 return new String[] {"Display P3", "SDR"};
             default:
                 return new String[] {"SDR"};
         }
+    }
+
+    private static String componentTypeName(int componentType) {
+        if (componentType == EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT) {
+            return "FLOAT";
+        }
+        if (componentType == EGL_COLOR_COMPONENT_TYPE_FIXED_EXT) {
+            return "FIXED";
+        }
+        return "0x" + Integer.toHexString(componentType);
     }
 }

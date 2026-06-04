@@ -46,4 +46,48 @@ public class LibretroHdrUniformsTest {
         assertEquals(2, LibretroHdrUniforms.GAMUT_WIDE);
         assertEquals(3, LibretroHdrUniforms.GAMUT_SUPER);
     }
+
+    @Test
+    public void subpixelEnumValuesMatchLibretroSpec() {
+        assertEquals(0, LibretroHdrUniforms.SUBPIXEL_RGB);
+        assertEquals(1, LibretroHdrUniforms.SUBPIXEL_RBG);
+        assertEquals(2, LibretroHdrUniforms.SUBPIXEL_BGR);
+    }
+
+    @Test
+    public void applyLibretroHdrModeSetsFlagsLikeRetroArch() {
+        LibretroHdrUniforms u = new LibretroHdrUniforms();
+
+        PostProcessVideoRenderer.applyLibretroHdrMode(u, LibretroHdrUniforms.HDR_MODE_OFF);
+        assertEquals(0.0f, u.inverseTonemap, 0.0f);
+        assertEquals(0.0f, u.hdr10, 0.0f);
+
+        PostProcessVideoRenderer.applyLibretroHdrMode(u, LibretroHdrUniforms.HDR_MODE_HDR10);
+        assertEquals(1.0f, u.inverseTonemap, 0.0f);
+        assertEquals(1.0f, u.hdr10, 0.0f);
+
+        PostProcessVideoRenderer.applyLibretroHdrMode(u, LibretroHdrUniforms.HDR_MODE_SCRGB);
+        assertEquals(0.0f, u.inverseTonemap, 0.0f);
+        assertEquals(0.0f, u.hdr10, 0.0f);
+
+        PostProcessVideoRenderer.applyLibretroHdrMode(u, LibretroHdrUniforms.HDR_MODE_PQ_TO_SCRGB);
+        assertEquals(0.0f, u.inverseTonemap, 0.0f);
+        assertEquals(0.0f, u.hdr10, 0.0f);
+    }
+
+    @Test
+    public void resolveHdrModeDoesNotSilentlySubstituteHdr10() {
+        assertEquals(LibretroHdrUniforms.HDR_MODE_HDR10,
+                PostProcessVideoRenderer.resolveHdrMode(
+                        LibretroHdrUniforms.HDR_MODE_HDR10,
+                        false,
+                        true,
+                        false));
+        assertEquals(LibretroHdrUniforms.HDR_MODE_OFF,
+                PostProcessVideoRenderer.resolveHdrMode(
+                        LibretroHdrUniforms.HDR_MODE_HDR10,
+                        true,
+                        false,
+                        false));
+    }
 }

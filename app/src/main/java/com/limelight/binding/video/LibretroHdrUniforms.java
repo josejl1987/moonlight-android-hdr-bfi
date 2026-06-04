@@ -30,7 +30,8 @@ public final class LibretroHdrUniforms {
     public static final int GAMUT_SUPER    = 3;  // passthrough (max boost)
 
     public static final int SUBPIXEL_RGB   = 0;
-    public static final int SUBPIXEL_BGR   = 1;
+    public static final int SUBPIXEL_RBG   = 1;
+    public static final int SUBPIXEL_BGR   = 2;
 
     public float[] mvp = identity4x4();
 

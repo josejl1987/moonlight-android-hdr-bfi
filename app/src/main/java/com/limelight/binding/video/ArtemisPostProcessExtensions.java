@@ -9,9 +9,8 @@ package com.limelight.binding.video;
  * <p>Specifically:</p>
  * <ul>
  *   <li>{@code bfiBrightnessCompensation} — multiplies the visible-phase
- *       {@code BrightnessNits} uniform by {@code 1 + darkFrames} (or
- *       {@code min(1 + darkFrames, 1.6)} for conservative mode) so BFI doesn't
- *       appear dimmer. Libretro itself never mutates BrightnessNits this way.</li>
+ *       brightness value for logging/UI purposes so BFI doesn't appear
+ *       dimmer. Libretro itself never mutates {@code BrightnessNits} this way.</li>
  *   <li>{@code forcePostProcess} — the renderer mode preference (Off / Auto /
  *       Force). The libretro pipeline doesn't gate on a user "force enable".</li>
  *   <li>{@code androidEglFallback} — set when the requested EGL mode (scRGB or
@@ -20,9 +19,9 @@ package com.limelight.binding.video;
  * </ul>
  *
  * <p>The renderer keeps the libretro struct ({@link LibretroHdrUniforms}) and
- * the Artemis extension layer as two distinct fields, and the BrightnessNits
- * uniform upload uses the computed {@link #visibleBrightnessNits} (libretro
- * value after Artemis compensation). Logs distinguish the two layers.</p>
+ * the Artemis extension layer as two distinct fields. The shader upload uses
+ * the raw libretro {@code BrightnessNits}; {@link #visibleBrightnessNits} is
+ * only used for logs and overlay text.</p>
  */
 public final class ArtemisPostProcessExtensions {
     public int bfiBrightnessCompensation = 0;

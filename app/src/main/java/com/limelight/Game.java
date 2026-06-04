@@ -4068,7 +4068,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // Diagnostic status
         TextView status = new TextView(this);
         status.setText(postProcessRenderer != null
-                ? "Renderer: active \u2014 changes apply live"
+                ? "Renderer: active \u2014 brightness/BFI apply live; HDR mode changes need reconnect"
                 : "Renderer: inactive \u2014 settings apply on next stream start");
         status.setPadding(0, 0, 0, pad);
         root.addView(status);

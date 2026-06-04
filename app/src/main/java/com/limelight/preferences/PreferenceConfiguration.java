@@ -248,7 +248,8 @@ public class PreferenceConfiguration {
     public static final int HDR_GAMUT_SUPER = 3;      // passthrough (max boost)
 
     public static final int HDR_SUBPIXEL_RGB = 0;
-    public static final int HDR_SUBPIXEL_BGR = 1;
+    public static final int HDR_SUBPIXEL_RBG = 1;
+    public static final int HDR_SUBPIXEL_BGR = 2;
 
     public static final int BFI_COMP_OFF = 0;
     public static final int BFI_COMP_CONSERVATIVE = 1;
@@ -1073,7 +1074,7 @@ private static int getFramePacingValue(Context context) {
         config.postProcessRendererMode = getIntPref(prefs, POST_PROCESS_RENDERER_PREF_STRING, DEFAULT_POST_PROCESS_RENDERER);
         config.videoHdrMode = getIntPref(prefs, VIDEO_HDR_MODE_PREF_STRING, DEFAULT_VIDEO_HDR_MODE);
         if (config.videoHdrMode > VIDEO_HDR_SCRGB) {
-            config.videoHdrMode = VIDEO_HDR_SCRGB;
+            config.videoHdrMode = VIDEO_HDR_OFF;
         }
         if (config.videoHdrMode < VIDEO_HDR_OFF) {
             config.videoHdrMode = VIDEO_HDR_OFF;
