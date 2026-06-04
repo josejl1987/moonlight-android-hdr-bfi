@@ -32,6 +32,7 @@ public final class EglPostProcessContext {
     private String actualMode;
     private int actualGlEsVersion;
     private boolean initialized;
+    private String framebufferFormatDescription;
 
     private boolean extColorspaceScrgbLinear;
     private boolean extColorspaceBt2020Pq;
@@ -138,6 +139,10 @@ public final class EglPostProcessContext {
         return actualGlEsVersion;
     }
 
+    public String getFramebufferFormatDescription() {
+        return framebufferFormatDescription;
+    }
+
     public boolean supportsScRgb() {
         return extColorspaceScrgbLinear;
     }
@@ -165,6 +170,7 @@ public final class EglPostProcessContext {
     private EGLConfig chooseConfig(String mode) {
         int[] baseAttribs;
         int renderableType;
+        boolean allow8bitFallback = false;
 
         switch (mode) {
             case "scRGB":
@@ -176,6 +182,7 @@ public final class EglPostProcessContext {
                         EGL14.EGL_ALPHA_SIZE, 16
                 };
                 renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
+                allow8bitFallback = true;
                 break;
             case "Display P3":
                 if (!extColorspaceDisplayP3) return null;
@@ -198,6 +205,23 @@ public final class EglPostProcessContext {
                 break;
         }
 
+        EGLConfig config = tryConfig(baseAttribs, renderableType);
+        if (config == null && allow8bitFallback) {
+            String fbMsg = "PostProcess: 16-bit scRGB config failed, trying 8-bit scRGB";
+            LimeLog.info(fbMsg);
+            Log.d("PostProcess", fbMsg);
+            baseAttribs = new int[] {
+                    EGL14.EGL_RED_SIZE, 8,
+                    EGL14.EGL_GREEN_SIZE, 8,
+                    EGL14.EGL_BLUE_SIZE, 8,
+                    EGL14.EGL_ALPHA_SIZE, 8
+            };
+            config = tryConfig(baseAttribs, renderableType);
+        }
+        return config;
+    }
+
+    private EGLConfig tryConfig(int[] baseAttribs, int renderableType) {
         int[] configAttribs = {
                 EGL14.EGL_RENDERABLE_TYPE, renderableType,
                 baseAttribs[0], baseAttribs[1],
@@ -253,14 +277,15 @@ public final class EglPostProcessContext {
         int totalBits = red[0] + green[0] + blue[0] + alpha[0];
         String format;
         if (totalBits == 64) {
-            format = "FP16 (scRGB likely)";
+            format = "FP16";
         } else if (totalBits == 32) {
-            format = "RGBA8 (SDR)";
+            format = "RGBA8";
         } else if (totalBits == 48) {
-            format = "RGB16 (FP16 no alpha)";
+            format = "RGB16";
         } else {
             format = "unknown";
         }
+        framebufferFormatDescription = format;
         String fbMsg = "PostProcess: framebuffer format R=" + red[0] + " G=" + green[0] + " B=" + blue[0]
                 + " A=" + alpha[0] + " total=" + totalBits + " -> " + format;
         LimeLog.info(fbMsg);

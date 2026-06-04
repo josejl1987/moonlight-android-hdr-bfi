@@ -258,10 +258,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         // Clamp HDRMode against the actual EGL mode we got (may have fallen back).
         String actualMode = eglContext.getActualMode();
-        if (!"scRGB".equals(actualMode) && hdrUniforms.hdrMode == LibretroHdrUniforms.HDR_MODE_SCRGB) {
+        if (!"scRGB".equals(actualMode)) {
             hdrUniforms.hdrMode = LibretroHdrUniforms.HDR_MODE_OFF;
             hdrUniforms.inverseTonemap = 0.0f;
             hdrUniforms.hdr10 = 0.0f;
+            hdrUniforms.brightnessNits = 80.0f;
         }
 
         // Initialize size uniforms from the stream configuration.
@@ -679,6 +680,14 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         if (hostHdrStreamActive) {
             sb.append(" | host HDR");
+        }
+
+        if (eglContext != null) {
+            sb.append(" | EGL: ").append(eglContext.getActualMode());
+            String fbDesc = eglContext.getFramebufferFormatDescription();
+            if (fbDesc != null) {
+                sb.append(" | FB: ").append(fbDesc);
+            }
         }
 
         statusListener.onPostProcessStatusUpdate(sb.toString());
