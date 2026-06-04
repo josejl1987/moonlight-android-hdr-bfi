@@ -4130,7 +4130,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 .setView(scrollView)
                 .setPositiveButton("Apply", (dialog, which) -> {
                     prefConfig.videoHdrMode = spinnerValue(hdrModeSpinner);
-                    prefConfig.videoHdrPaperWhiteNits = paperWhiteValues[paperWhiteSeek.getProgress()];
+                    prefConfig.videoHdrPaperWhiteNits = brightnessValues[brightnessSeek.getProgress()];
                     prefConfig.videoBlackFrameInsertion = bfiCheck.isChecked();
                     prefConfig.videoBfiDarkFrames = spinnerValue(darkFrameSpinner);
                     prefConfig.videoBfiCompensationMode = spinnerValue(compSpinner);
@@ -4140,8 +4140,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 .show();
     }
 
-    private void updatePaperWhiteLabel(TextView label, int nits) {
-        label.setText("HDR paper white: " + nits + " nits");
+    private void updateBrightnessLabel(TextView label, int nits) {
+        label.setText("HDR brightness: " + nits + " nits");
     }
 
     private Spinner createSpinner(LinearLayout parent, String label, String[] displayValues, int[] numericValues, int currentValue) {
