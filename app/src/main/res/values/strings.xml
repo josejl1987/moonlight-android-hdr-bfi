@@ -753,5 +753,18 @@
     <string name="title_video_bfi">Black frame insertion</string>
     <string name="summary_video_bfi">Insert black display frames after decoding. Requires display refresh to be a clean multiple of the stream frame rate.</string>
     <string name="title_video_bfi_dark_frames">BFI dark frames</string>
-    <string name="summary_video_bfi_dark_frames">Number of black refresh intervals inserted between visible frames</string>
+<string name="summary_video_bfi_dark_frames">Number of black refresh intervals inserted between visible frames</string>
+
+    <!-- Test UX: A/B frame capture (Commit 3) -->
+    <string name="capture_a_label">Capture A</string>
+    <string name="capture_b_label">Capture B</string>
+    <string name="compare_ab_label">Compare A/B</string>
+    <string name="clear_captures_label">Clear captures</string>
+    <string name="capture_success_a">Captured frame A</string>
+    <string name="capture_success_b">Captured frame B</string>
+    <string name="capture_failed">Capture failed</string>
+    <string name="capture_error_stream_stopped">Stream not active</string>
+
+    <!-- Test UX: live HDR gamut hot-toggle (Commit 4) -->
+    <string name="game_menu_cycle_gamut">Cycle gamut</string>
 </resources>

@@ -42,16 +42,26 @@ public class GameMenu implements Game.GameMenuCallbacks {
     public static class MenuOption {
         private final String label;
         private final boolean withGameFocus;
+        private final boolean keepOpen;
         private final Runnable runnable;
 
-        public MenuOption(String label, boolean withGameFocus, Runnable runnable) {
+        public MenuOption(String label, boolean withGameFocus, boolean keepOpen, Runnable runnable) {
             this.label = label;
             this.withGameFocus = withGameFocus;
+            this.keepOpen = keepOpen;
             this.runnable = runnable;
         }
 
+        public MenuOption(String label, boolean withGameFocus, Runnable runnable) {
+            this(label, withGameFocus, false, runnable);
+        }
+
         public MenuOption(String label, Runnable runnable) {
-            this(label, false, runnable);
+            this(label, false, false, runnable);
+        }
+
+        public boolean isKeepOpen() {
+            return keepOpen;
         }
     }
 
@@ -118,6 +128,12 @@ public class GameMenu implements Game.GameMenuCallbacks {
             String label = actions.getItem(which);
             for (MenuOption option : options) {
                 if (label != null && label.equals(option.label)) {
+                    // Honour the keepOpen flag: when true, the dialog stays
+                    // open so the user can hit the same virtual key several
+                    // times in a row (e.g. gamut cycling).
+                    if (!option.isKeepOpen()) {
+                        dialog.dismiss();
+                    }
                     run(option);
                     break;
                 }
@@ -237,6 +253,13 @@ public class GameMenu implements Game.GameMenuCallbacks {
                 Toast.makeText(game,getString(R.string.wrong_import_format),Toast.LENGTH_SHORT).show();
             }
         }
+
+        // Live HDR gamut hot-toggle. keepOpen=true so the user can cycle
+        // several times without re-opening the menu (REQ-4-5).
+        options.add(new MenuOption(getString(R.string.game_menu_cycle_gamut),
+                /*withGameFocus*/ true, /*keepOpen*/ true,
+                () -> game.cycleGamut()));
+
         options.add(new MenuOption(getString(R.string.game_menu_cancel), null));
 
         showMenuDialog(getString(R.string.game_menu_send_keys), options.toArray(new MenuOption[options.size()]));
@@ -247,15 +270,25 @@ public class GameMenu implements Game.GameMenuCallbacks {
         if (game.allowChangeMouseMode) {
             options.add(new MenuOption(getString(R.string.game_menu_select_mouse_mode), true, () -> game.selectMouseMode(dialogScreenContext)));
         }
-        
+
         options.add(new MenuOption(getString(R.string.game_menu_toggle_hud), true, game::toggleHUD));
         options.add(new MenuOption(getString(R.string.game_menu_toggle_floating_button), true, game::toggleFloatingButtonVisibility));
         options.add(new MenuOption(getString(R.string.game_menu_toggle_keyboard_model), true, game::toggleKeyboardController));
-        if (!game.isOnExternalDisplay()) {
+if (!game.isOnExternalDisplay()) {
             options.add(new MenuOption(getString(R.string.game_menu_toggle_virtual_model), true, game::toggleVirtualController));
         }
         options.add(new MenuOption(getString(R.string.game_menu_toggle_virtual_keyboard_model), true, game::toggleFullKeyboard));
         options.add(new MenuOption(getString(R.string.game_menu_task_manager), true, () -> sendKeys(new short[]{KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_ESCAPE})));
+        // A/B frame capture — disables the matching button on the Game
+        // side for 2 s, then re-enables it via a Handler.postDelayed.
+        options.add(new MenuOption(getString(R.string.capture_a_label), false, () -> {
+            game.captureFrameA(() -> game.notifyCaptureButtonReenabled(R.string.capture_a_label));
+        }));
+        options.add(new MenuOption(getString(R.string.capture_b_label), false, () -> {
+            game.captureFrameB(() -> game.notifyCaptureButtonReenabled(R.string.capture_b_label));
+        }));
+        options.add(new MenuOption(getString(R.string.compare_ab_label), false, () -> game.openCompareView()));
+        options.add(new MenuOption(getString(R.string.clear_captures_label), false, () -> game.clearCaptures()));
 
         // **FIXED:** This is a UI navigation action, so it should not use withGameFocus.
         options.add(new MenuOption(getString(R.string.game_menu_send_keys), () -> {

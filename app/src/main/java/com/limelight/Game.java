@@ -28,6 +28,7 @@ import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
+import com.limelight.binding.video.PostProcessAbCompareView;
 import com.limelight.binding.video.PostProcessStatusListener;
 import com.limelight.binding.video.PostProcessVideoRenderer;
 import com.limelight.nvstream.NvConnection;
@@ -71,6 +72,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.graphics.Bitmap;
 import android.graphics.Outline;
 import android.graphics.Point;
 import android.graphics.Rect;
@@ -236,6 +238,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private PostProcessVideoRenderer postProcessRenderer;
 
     private boolean reportedCrash;
+
+    // A/B frame capture state (test-UX). Bitmaps are owned by this Activity
+    // and recycled in onDestroy/onStop. The capture readback downsamples to
+    // 720p to stay under the ~8 MB heap budget per REQ-3-9.
+    private static final int CAPTURE_WIDTH = 1280;
+    private static final int CAPTURE_HEIGHT = 720;
+    private static final long CAPTURE_COOLDOWN_MS = 2000L;
+    private Bitmap bitmapA;
+    private Bitmap bitmapB;
+    private PostProcessAbCompareView compareView;
 
     private WifiManager.WifiLock highPerfWifiLock;
     private WifiManager.WifiLock lowLatencyWifiLock;
@@ -1771,6 +1783,11 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         releasePostProcessRenderer();
+
+        // Release A/B compare state (REQ-X-5: bitmaps recycled on lifecycle).
+        closeCompareView();
+        if (bitmapA != null) { bitmapA.recycle(); bitmapA = null; }
+        if (bitmapB != null) { bitmapB.recycle(); bitmapB = null; }
 
         // Destroy the capture provider
         inputCaptureProvider.destroy();
@@ -4000,6 +4017,140 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     }
 
+    /**
+     * A/B frame capture — slot A. Blocks the UI thread for up to ~2s on the
+     * readback (intentional per REQ-3-3; the caller must disable the source
+     * button before invoking). Caches the bitmap and re-enables the
+     * trigger button via a 2-second {@code Handler.postDelayed} cooldown.
+     */
+    public void captureFrameA(Runnable onButtonReenable) {
+        Bitmap bmp = readbackCaptureBitmap();
+        if (bmp != null) {
+            if (bitmapA != null) {
+                bitmapA.recycle();
+            }
+            bitmapA = bmp;
+            Toast.makeText(this, R.string.capture_success_a, Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_SHORT).show();
+        }
+        if (onButtonReenable != null) {
+            timerHandler.postDelayed(onButtonReenable, CAPTURE_COOLDOWN_MS);
+        }
+    }
+
+    /**
+     * A/B frame capture — slot B. See {@link #captureFrameA(Runnable)} for
+     * semantics.
+     */
+    public void captureFrameB(Runnable onButtonReenable) {
+        Bitmap bmp = readbackCaptureBitmap();
+        if (bmp != null) {
+            if (bitmapB != null) {
+                bitmapB.recycle();
+            }
+            bitmapB = bmp;
+            Toast.makeText(this, R.string.capture_success_b, Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_SHORT).show();
+        }
+        if (onButtonReenable != null) {
+            timerHandler.postDelayed(onButtonReenable, CAPTURE_COOLDOWN_MS);
+        }
+    }
+
+    public boolean canOpenCompareView() {
+        return bitmapA != null && bitmapB != null;
+    }
+
+    /**
+     * No-op placeholder for the live HDR gamut hot-toggle. The full
+     * implementation (persist + renderer update + flash overlay) lands in
+     * the test-UX gamut commit. Exposed here so the GameMenu entry can
+     * resolve in Commit 3.
+     */
+    public void cycleGamut() {
+        // Filled in by the gamut commit.
+    }
+
+    /**
+     * No-op placeholder for the capture button re-enable callback. The
+     * advanced menu sets a Runnable that calls back to this method after
+     * the 2 s capture cooldown; the UI side is wired in Commit 5 alongside
+     * the test-patterns submenu, so this is intentionally a stub for now.
+     */
+    public void notifyCaptureButtonReenabled(int labelResId) {
+        // Wired in the test-UX commit that adds the capture button list.
+    }
+
+    /**
+     * Attach a full-screen compare overlay above the game surface. The
+     * View is added to {@code streamContainer.getParent()} (a FrameLayout
+     * per activity_game.xml) so it sits in z-order above the stream and
+     * consumes touch.
+     */
+    public void openCompareView() {
+        if (!canOpenCompareView() || compareView != null) {
+            return;
+        }
+        if (streamContainer == null || streamContainer.getParent() == null) {
+            return;
+        }
+        ViewGroup parent = (ViewGroup) streamContainer.getParent();
+        compareView = new PostProcessAbCompareView(
+                this, bitmapA, bitmapB);
+        parent.addView(compareView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+    }
+
+    /**
+     * Detach and release the compare overlay. No-op if not attached.
+     */
+    public void closeCompareView() {
+        if (compareView == null) {
+            return;
+        }
+        ViewParent parent = compareView.getParent();
+        if (parent instanceof ViewGroup) {
+            ((ViewGroup) parent).removeView(compareView);
+        }
+        compareView.release();
+        compareView = null;
+    }
+
+    /**
+     * Discard both A and B bitmaps, releasing native heap, and close the
+     * compare overlay if it is open. The Compare button is disabled by the
+     * caller once this returns.
+     */
+    public void clearCaptures() {
+        closeCompareView();
+        if (bitmapA != null) { bitmapA.recycle(); bitmapA = null; }
+        if (bitmapB != null) { bitmapB.recycle(); bitmapB = null; }
+    }
+
+    /**
+     * Read back a downsampled RGBA8 frame from the live post-process
+     * renderer and convert it to an ARGB_8888 {@link Bitmap}. Returns
+     * {@code null} if the renderer is not active, the readback failed, or
+     * the byte buffer is the wrong size.
+     */
+    private Bitmap readbackCaptureBitmap() {
+        if (postProcessRenderer == null) {
+            Toast.makeText(this, R.string.capture_error_stream_stopped, Toast.LENGTH_SHORT).show();
+            return null;
+        }
+        byte[] rgba = postProcessRenderer.readbackTonemapRgba8(CAPTURE_WIDTH, CAPTURE_HEIGHT);
+        if (rgba == null || rgba.length != CAPTURE_WIDTH * CAPTURE_HEIGHT * 4) {
+            return null;
+        }
+        Bitmap bmp = Bitmap.createBitmap(CAPTURE_WIDTH, CAPTURE_HEIGHT, Bitmap.Config.ARGB_8888);
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(rgba);
+        bmp.copyPixelsFromBuffer(buf);
+        return bmp;
+    }
+
     @Override
     public void onUsbPermissionPromptStarting() {
         // Disable PiP auto-enter while the USB permission prompt is on-screen. This prevents
@@ -4030,6 +4181,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void onBackPressed() {
+        if (compareView != null) {
+            closeCompareView();
+            return;
+        }
         if(prefConfig.enableBackMenu){
             showGameMenu(null);
             return;
