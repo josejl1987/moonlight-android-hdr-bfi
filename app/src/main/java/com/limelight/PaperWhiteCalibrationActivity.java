@@ -39,6 +39,20 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     private SeekBar seekBar;
     private TextView valueText;
     private int currentNits;
+    private FrameLayout root;
+
+    /**
+     * Map a paper-white nits value to an sRGB gray for the live preview.
+     * The reference (200 nits) is fixed at #808080; lower nits goes dimmer,
+     * higher nits goes brighter. Uses a gamma-2 inverse so the perceived
+     * brightness scales the way the eye sees it.
+     */
+    private static int nitsToGrayColor(int nits) {
+        double t = nits / 200.0;
+        double srgb = Math.pow(t, 0.4545) * 128.0;
+        int gray = Math.max(20, Math.min(240, (int) srgb));
+        return 0xFF000000 | (gray << 16) | (gray << 8) | gray;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,8 +69,8 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
                 ? savedInstanceState.getInt(STATE_NITS, prefConfig.videoHdrPaperWhiteNits)
                 : prefConfig.videoHdrPaperWhiteNits;
 
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(0xFF808080);
+        root = new FrameLayout(this);
+        root.setBackgroundColor(nitsToGrayColor(currentNits));
         setContentView(root);
 
         // --- Title at the top center -----------------------------------
@@ -94,6 +108,7 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
                 int nits = MIN_NITS + progress * STEP_NITS;
                 currentNits = nits;
                 valueText.setText(nits + " nits");
+                root.setBackgroundColor(nitsToGrayColor(nits));
                 persist(nits);
                 pushToLiveRenderer();
             }
