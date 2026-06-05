@@ -767,4 +767,10 @@
 
     <!-- Test UX: live HDR gamut hot-toggle (Commit 4) -->
     <string name="game_menu_cycle_gamut">Cycle gamut</string>
+
+    <!-- Test UX: paper-white calibration wizard (Commit 4) -->
+    <string name="game_menu_calibrate_paper_white">Calibrate paper white</string>
+    <string name="paper_white_title">Paper white calibration</string>
+    <string name="paper_white_done">Done</string>
+    <string name="paper_white_reset">Reset to 200</string>
 </resources>

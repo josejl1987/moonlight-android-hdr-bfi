@@ -25,6 +25,7 @@ import com.limelight.binding.input.virtual_controller.VirtualController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
 import com.limelight.binding.video.CrashListener;
+import com.limelight.binding.video.GamutCycle;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
@@ -228,6 +229,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean overlayToggleZoomButtonShown;
     private TextView notificationOverlayView;
     private int requestedNotificationOverlayVisibility = View.GONE;
+    private TextView postProcessFlashOverlayView;
     private View performanceOverlayView;
 
     private TextView performanceOverlayLite;
@@ -533,6 +535,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         notificationOverlayView = findViewById(R.id.notificationOverlay);
 
+        // Separate TextView for transient flash messages (e.g. gamut cycle
+        // confirmation). Lives next to postProcessOverlay but is NOT updated
+        // by the renderer's status publish, so the flash text survives the
+        // next 60-frame status push — see discovery-overlay-clobber.
+        postProcessFlashOverlayView = findViewById(R.id.postProcessFlashOverlay);
+        if (postProcessFlashOverlayView != null) {
+            postProcessFlashOverlayView.setVisibility(View.GONE);
+        }
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
 
@@ -4064,14 +4074,77 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     /**
-     * No-op placeholder for the live HDR gamut hot-toggle. The full
-     * implementation (persist + renderer update + flash overlay) lands in
-     * the test-UX gamut commit. Exposed here so the GameMenu entry can
-     * resolve in Commit 3.
+     * Live HDR gamut hot-toggle. Advances the gamut one step, persists the
+     * pref so a future reconnect picks it up, asks the active renderer(s)
+     * to apply the change, and flashes a 1-second confirmation overlay.
      */
     public void cycleGamut() {
-        // Filled in by the gamut commit.
+        int next = GamutCycle.next(prefConfig.videoHdrExpandGamut);
+        prefConfig.videoHdrExpandGamut = next;
+        SharedPreferences.Editor editor = PreferenceManager
+                .getDefaultSharedPreferences(this).edit();
+        PreferenceConfiguration.writePostProcessPreferences(editor, prefConfig);
+        editor.apply();
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings();
+        }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.updateSettings();
+        }
+        flashPostProcessOverlay("Gamut: " + GamutCycle.name(next), 1000);
     }
+
+    /**
+     * Live re-apply of post-process settings to the active renderer. Used
+     * by the paper-white calibration wizard to push SeekBar drags into the
+     * live shader uniforms without going through the quick-setup panel.
+     */
+    public void applyPostProcessSettingsLive() {
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings();
+        }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.updateSettings();
+        }
+    }
+
+    /**
+     * Launch the paper-white calibration wizard as a separate Activity.
+     * The wizard persists its own pref changes and applies them live to
+     * the active renderer via {@link #applyPostProcessSettingsLive()}.
+     */
+    public void launchPaperWhiteCalibration() {
+        Intent intent = new Intent(this, PaperWhiteCalibrationActivity.class);
+        startActivity(intent);
+    }
+
+    /**
+     * Show a transient text overlay for {@code durationMs}. Uses a
+     * dedicated TextView so the regular status publish (every 60 frames)
+     * does not clobber the flash text. Repeated calls cancel the previous
+     * pending hide.
+     */
+    public void flashPostProcessOverlay(String text, int durationMs) {
+        if (postProcessFlashOverlayView == null) {
+            return;
+        }
+        // Cancel any previously scheduled hide so the new flash gets a
+        // full window.
+        postProcessFlashOverlayView.removeCallbacks(flashClearRunnable);
+        postProcessFlashOverlayView.setText(text);
+        postProcessFlashOverlayView.setVisibility(View.VISIBLE);
+        postProcessFlashOverlayView.postDelayed(flashClearRunnable, durationMs);
+    }
+
+    private final Runnable flashClearRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (postProcessFlashOverlayView != null) {
+                postProcessFlashOverlayView.setVisibility(View.GONE);
+                postProcessFlashOverlayView.setText("");
+            }
+        }
+    };
 
     /**
      * No-op placeholder for the capture button re-enable callback. The
