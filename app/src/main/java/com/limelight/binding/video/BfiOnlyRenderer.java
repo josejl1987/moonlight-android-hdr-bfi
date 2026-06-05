@@ -12,7 +12,6 @@ import android.view.Window;
 
 import com.limelight.LimeLog;
 import com.limelight.preferences.PreferenceConfiguration;
-import com.limelight.ui.StreamView;
 
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -68,11 +67,6 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     private final float displayRefreshRate;
     private final Window window;
     private final Display display;
-    private final StreamView streamView;
-    // The StreamView parameter is a typed name for the Game activity
-    // (which implements PostProcessStatusListener at the time of writing).
-    // We cast to the listener interface once and use that field for status
-    // pushes — StreamView itself has no onPostProcessStatusUpdate method.
     private final PostProcessStatusListener statusListener;
 
     private EglPostProcessContext eglContext;
@@ -126,7 +120,7 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
             float displayRefreshRate,
             Window window,
             Display display,
-            StreamView streamView
+            PostProcessStatusListener statusListener
     ) {
         this.context = context;
         this.outputSurface = outputSurface;
@@ -135,13 +129,7 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
         this.displayRefreshRate = displayRefreshRate;
         this.window = window;
         this.display = display;
-        this.streamView = streamView;
-        // Cast once. If a future refactor passes a StreamView that does not
-        // implement PostProcessStatusListener, the renderer silently never
-        // publishes status (listener == null) rather than crashing.
-        this.statusListener = (streamView instanceof PostProcessStatusListener)
-                ? (PostProcessStatusListener) streamView
-                : null;
+        this.statusListener = statusListener;
     }
 
     public Surface getCodecSurface() {

@@ -24,6 +24,8 @@ import com.limelight.binding.input.touch.TrackpadContext;
 import com.limelight.binding.input.virtual_controller.VirtualController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
+import com.limelight.binding.video.BfiOnlyRenderer;
+import com.limelight.binding.video.BfiScheduler;
 import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
@@ -244,6 +246,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     private MediaCodecDecoderRenderer decoderRenderer;
     private PostProcessVideoRenderer postProcessRenderer;
+    private BfiOnlyRenderer bfiOnlyRenderer;
     private boolean reportedCrash;
 
     private WifiManager.WifiLock highPerfWifiLock;
@@ -928,8 +931,66 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                         decoderRenderer.setRenderTarget(renderSurface);
                         showPostProcessOverlay(false);
                     }
+                } else if (finalWillStreamHdr
+                        && prefConfig.videoBlackFrameInsertion
+                        && new BfiScheduler().canEnable(prefConfig.fps, displayRefreshRate,
+                                Math.max(1, prefConfig.videoBfiDarkFrames))) {
+                    // BFI fast path: libretro path is disabled (e.g. user set
+                    // the post-process renderer to OFF) but host HDR is on and
+                    // BFI is requested and the display refresh matches. A new
+                    // BfiOnlyRenderer owns its own EGL HDR10 surface + OES
+                    // adapter, alternating source/black frames at the BFI
+                    // cadence. Bypasses the libretro composite entirely.
+                    try {
+                        bfiOnlyRenderer = new BfiOnlyRenderer(
+                                Game.this,
+                                renderSurface,
+                                prefConfig,
+                                prefConfig.fps,
+                                displayRefreshRate,
+                                getWindow(),
+                                finalCurrentDisplay,
+                                Game.this
+                        );
+                        if (bfiOnlyRenderer != null && bfiOnlyRenderer.startBlocking()) {
+                            decoderRenderer.setRenderTarget(bfiOnlyRenderer.getCodecSurface());
+                            LimeLog.info("BFI-only fast path enabled");
+                            showPostProcessOverlay(true);
+                        } else {
+                            String msg = "BFI fast path unavailable on this device";
+                            LimeLog.warning(msg);
+                            if (bfiOnlyRenderer != null) {
+                                bfiOnlyRenderer.release();
+                                bfiOnlyRenderer = null;
+                            }
+                            decoderRenderer.setRenderTarget(renderSurface);
+                            showPostProcessOverlay(false);
+                            Toast.makeText(Game.this, msg, Toast.LENGTH_LONG).show();
+                        }
+                    } catch (Throwable t) {
+                        LimeLog.warning("BFI fast path exception; falling back to direct surface: " + t);
+                        if (bfiOnlyRenderer != null) {
+                            bfiOnlyRenderer.release();
+                            bfiOnlyRenderer = null;
+                        }
+                        decoderRenderer.setRenderTarget(renderSurface);
+                        showPostProcessOverlay(false);
+                    }
                 } else {
-                    Toast.makeText(Game.this, ppDecision.reason, Toast.LENGTH_LONG).show();
+                    // Direct surface fallback. Override the reason text when
+                    // the user has BFI requested but the display refresh rate
+                    // does not match — the existing ppDecision.reason is
+                    // tailored to the libretro path and would be confusing.
+                    String reason = ppDecision.reason;
+                    if (finalWillStreamHdr
+                            && prefConfig.videoBlackFrameInsertion
+                            && !new BfiScheduler().canEnable(prefConfig.fps, displayRefreshRate,
+                                    Math.max(1, prefConfig.videoBfiDarkFrames))) {
+                        int requiredHz = Math.round(prefConfig.fps
+                                * (1 + Math.max(1, prefConfig.videoBfiDarkFrames)));
+                        reason = "BFI fast path requires display refresh ~ " + requiredHz + " Hz";
+                    }
+                    Toast.makeText(Game.this, reason, Toast.LENGTH_LONG).show();
                     decoderRenderer.setRenderTarget(renderSurface);
                     showPostProcessOverlay(false);
                 }
@@ -1808,6 +1869,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             postProcessRenderer.release();
             postProcessRenderer = null;
         }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.release();
+            bfiOnlyRenderer = null;
+        }
         if (postProcessOverlayView != null) {
             postProcessOverlayView.setVisibility(View.GONE);
             postProcessOverlayView.setText("");
@@ -1854,6 +1919,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (postProcessRenderer != null) {
             postProcessRenderer.release();
             postProcessRenderer = null;
+        }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.release();
+            bfiOnlyRenderer = null;
         }
         showPostProcessOverlay(false);
 
