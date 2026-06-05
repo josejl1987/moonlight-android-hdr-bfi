@@ -84,6 +84,8 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     private volatile boolean running;
     private volatile boolean recoveryFailed;
     private volatile boolean surfaceTextureReady;
+    private volatile boolean frameAvailable;
+    private int statsFrameCount;
 
     private HandlerThread renderThread;
     private Handler renderHandler;
@@ -218,9 +220,10 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
 
     @Override
     public void onFrameAvailable(SurfaceTexture st) {
-        // Informational; the Choreographer loop polls on every vsync and
-        // consumes the latest OES frame. Keep wiring symmetric with
-        // PostProcessVideoRenderer for debuggability.
+        // Listener fires on the render thread (we passed renderHandler to
+        // setOnFrameAvailableListener). The Choreographer loop consumes the
+        // flag on each vsync — see onVsyncFrame.
+        frameAvailable = true;
     }
 
     private void initGl() {
@@ -321,6 +324,9 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
                 + " bfi=" + bfiActive + " darkFrames=" + darkFrames);
 
         if (initLatch != null) initLatch.countDown();
+
+        // Kick off the Choreographer-driven render loop on this render thread.
+        choreographer.postFrameCallback(renderFrameCallback);
     }
 
     private void releaseGl() {
@@ -353,10 +359,81 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     }
 
     private void onVsyncFrame(long frameTimeNanos) {
-        // Render loop is added in WU-2. After init we keep the Choreographer
-        // quiet — no per-frame work yet. The class is fully constructed and
-        // EGL+GL are current; the next WU adds the black/show branches.
-        if (choreographer != null && running && !recoveryFailed) {
+        if (!running || recoveryFailed || eglContext == null || !eglContext.isInitialized()) {
+            return;
+        }
+
+        if (!eglContext.makeCurrent()) {
+            LimeLog.warning("BfiOnly: EGL context lost, stopping renderer");
+            recoveryFailed = true;
+            return;
+        }
+
+        int surfaceW = eglContext.getSurfaceWidth();
+        int surfaceH = eglContext.getSurfaceHeight();
+        if (surfaceW > 0 && surfaceH > 0) {
+            GLES20.glViewport(0, 0, surfaceW, surfaceH);
+        }
+
+        boolean isBlack = bfiScheduler.nextIsBlack();
+
+        if (isBlack) {
+            // Dark phase: write PQ(0) via glClear. On a BT.2020 PQ EGL
+            // surface the framebuffer is registered as PQ-encoded to the
+            // compositor, so zero RGB writes PQ(0) = 0 cd/m² — true black
+            // after the panel EOTF.
+            GLES20.glClearColor(0f, 0f, 0f, 1f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        } else if (frameAvailable && surfaceTextureReady) {
+            // Show phase: consume the latest OES frame, draw it through the
+            // OES adapter program into the EGL window surface.
+            try {
+                surfaceTexture.updateTexImage();
+                surfaceTexture.getTransformMatrix(oesTransform);
+            } catch (Exception e) {
+                LimeLog.warning("BfiOnly: updateTexImage failed: " + e.getMessage());
+                recoveryFailed = true;
+                return;
+            }
+            frameAvailable = false;
+
+            // Always clear to black first so any partial draw is bounded by
+            // PQ(0). The OES adapter program overwrites the entire viewport
+            // with the decoded frame.
+            GLES20.glClearColor(0f, 0f, 0f, 1f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+
+            GLES20.glUseProgram(oesProgram);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+            GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, oesTextureId);
+            GLES20.glUniform1i(uTextureLoc, 0);
+            GLES20.glUniformMatrix4fv(uTexTransformLoc, 1, false, oesTransform, 0);
+
+            GLES20.glEnableVertexAttribArray(aPosLoc);
+            GLES20.glVertexAttribPointer(aPosLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
+            GLES20.glEnableVertexAttribArray(aTexCoordLoc);
+            GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+
+            GLES20.glDisableVertexAttribArray(aPosLoc);
+            GLES20.glDisableVertexAttribArray(aTexCoordLoc);
+        } else {
+            // Show phase but no new frame from the decoder (stall). Per spec:
+            // do not repeat the last frame (would cause motion judder); write
+            // PQ(0) instead. Once frames flow again, the next vsync will draw.
+            GLES20.glClearColor(0f, 0f, 0f, 1f);
+            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+        }
+
+        if (!recoveryFailed) {
+            eglContext.swapBuffers();
+        }
+
+        // Status publishing will be added in WU-3; keep a frame counter for it.
+        statsFrameCount++;
+
+        if (running && !recoveryFailed && choreographer != null) {
             choreographer.postFrameCallback(renderFrameCallback);
         }
     }
