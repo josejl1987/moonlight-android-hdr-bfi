@@ -1017,36 +1017,11 @@ public class StreamSettings extends AppCompatActivity {
 
             if (ppPref != null && hdrPref != null && bfiPref != null) {
 
-                // Compute whether the BFI checkbox should be enabled right
-                // now. The post-process path (the original case) requires
-                // the libretro renderer to be on. The fast path requires
-                // host HDR AND a device that can do a BT.2020 PQ EGL
-                // surface (the BFI fast path bypasses libretro entirely;
-                // see Game.java's renderer decision). One cached probe per
-                // process — see EglPostProcessContext.deviceSupportsHdr10Egl.
-                //
-                // We read enableHdr directly from the SharedPreferences
-                // because this fragment is a static nested class and
-                // cannot reach StreamSettings.previousPrefs (an instance
-                // field on the outer activity).
-                final boolean hdr10EglSupported =
-                        com.limelight.binding.video.EglPostProcessContext.deviceSupportsHdr10Egl(getActivity());
-                final boolean enableHdrOn = getPrefs().getBoolean("checkbox_enable_hdr", false);
-
+                // BFI is now enabled only when the libretro renderer is on.
                 ppPref.setOnPreferenceChangeListener((pref, newVal) -> {
-                    Log.i("StreamSettings", "post-process renderer changed to " + newVal);
                     boolean on = !"0".equals(newVal);
                     hdrPref.setEnabled(on);
-                    // BFI is enabled when either the libretro path is on
-                    // (legacy) OR the host-HDR + HDR10-EGL fast path is
-                    // available. The user's checked-state is intentionally
-                    // NOT force-cleared when the libretro path goes off —
-                    // it persists across renderer toggles, and the
-                    // stream-side gate in Game.java rejects it if HDR or
-                    // HDR10 EGL is no longer available at stream time.
-                    boolean bfiEnabled = on
-                            || (hdr10EglSupported && enableHdrOn);
-                    bfiPref.setEnabled(bfiEnabled);
+                    bfiPref.setEnabled(on);
                     if (!on) {
                         hdrPref.setValue("0");
                     }
@@ -1055,7 +1030,7 @@ public class StreamSettings extends AppCompatActivity {
                     if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
                     if (scanlinesPref != null) scanlinesPref.setEnabled(hdrOn);
                     if (subpixelPref != null) subpixelPref.setEnabled(hdrOn);
-                    if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(bfiEnabled && bfiPref.isChecked());
+                    if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(on && bfiPref.isChecked());
                     return true;
                 });
 
@@ -1080,9 +1055,7 @@ public class StreamSettings extends AppCompatActivity {
                 String curPp = ppPref.getValue();
                 boolean ppOn = curPp != null && !"0".equals(curPp);
                 hdrPref.setEnabled(ppOn);
-                boolean bfiEnabled = ppOn
-                        || (hdr10EglSupported && enableHdrOn);
-                bfiPref.setEnabled(bfiEnabled);
+                bfiPref.setEnabled(ppOn);
 
                 String curHdr = hdrPref.getValue();
                 boolean hdrOn = ppOn && curHdr != null && !"0".equals(curHdr);
@@ -1090,7 +1063,7 @@ public class StreamSettings extends AppCompatActivity {
                 if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
                 if (scanlinesPref != null) scanlinesPref.setEnabled(hdrOn);
                 if (subpixelPref != null) subpixelPref.setEnabled(hdrOn);
-                if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(bfiEnabled && bfiPref.isChecked());
+                if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(ppOn && bfiPref.isChecked());
             }
         }
 

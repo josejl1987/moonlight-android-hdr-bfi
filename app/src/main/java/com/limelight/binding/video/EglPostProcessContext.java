@@ -18,7 +18,6 @@ public final class EglPostProcessContext {
     private static final int EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT = 0x3350;
     private static final int EGL_GL_COLORSPACE_SCRGB_EXT = 0x3351;
     private static final int EGL_GL_COLORSPACE_BT2020_LINEAR_EXT = 0x333F;
-    private static final int EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT = 0x3490;
     private static final int EGL_COLOR_COMPONENT_TYPE_EXT = 0x3339;
     private static final int EGL_COLOR_COMPONENT_TYPE_FIXED_EXT = 0x333A;
     private static final int EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT = 0x333B;
@@ -40,7 +39,6 @@ public final class EglPostProcessContext {
     private boolean extPixelFormatFloat;
     private boolean extColorspaceBt2020Pq;
     private boolean extColorspaceBt2020Linear;
-    private boolean extColorspaceDisplayP3;
 
     public EglPostProcessContext(Surface outputSurface, String requestMode) {
         this.outputSurface = outputSurface;
@@ -138,82 +136,6 @@ public final class EglPostProcessContext {
         return framebufferFormatDescription;
     }
 
-    public boolean supportsScRgb() {
-        return extColorspaceScrgbLinear;
-    }
-
-    public boolean supportsHdr10() {
-        return extColorspaceBt2020Pq;
-    }
-
-    /**
-     * One-shot, cached probe for the device's BT.2020 PQ EGL surface
-     * support. Used by {@code StreamSettings} to enable the BFI checkbox
-     * in the host-HDR + no-renderer case (the BFI fast path requires a
-     * PQ EGL surface).
-     *
-     * <p>The probe opens a temporary EGL display, queries the extension
-     * string, then terminates the display. The result is cached in a
-     * static {@code AtomicReference} for the rest of the process
-     * lifetime (a few ms on first call, O(1) thereafter). The
-     * {@code context} parameter is currently unused but is accepted for
-     * API symmetry with the rest of the project.</p>
-     *
-     * @return {@code true} if the device exposes
-     *         {@code EGL_EXT_gl_colorspace_bt2020_pq}; {@code false} on
-     *         any probe failure, missing extension, or platform that
-     *         does not return a usable EGL display.
-     */
-    public static boolean deviceSupportsHdr10Egl(android.content.Context context) {
-        Boolean cached = sHdr10EglProbeResult.get();
-        if (cached != null) {
-            return cached;
-        }
-        synchronized (sHdr10EglProbeLock) {
-            cached = sHdr10EglProbeResult.get();
-            if (cached != null) {
-                return cached;
-            }
-            boolean result = probeHdr10EglSupport();
-            sHdr10EglProbeResult.set(result);
-            return result;
-        }
-    }
-
-    private static boolean probeHdr10EglSupport() {
-        android.opengl.EGLDisplay display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-        if (display == EGL14.EGL_NO_DISPLAY) {
-            return false;
-        }
-        int[] version = new int[2];
-        if (!EGL14.eglInitialize(display, version, 0, version, 1)) {
-            return false;
-        }
-        try {
-            String ext = EGL14.eglQueryString(display, 0x3055);
-            if (ext == null) {
-                return false;
-            }
-            return ext.contains("EGL_EXT_gl_colorspace_bt2020_pq");
-        } catch (Throwable t) {
-            LimeLog.warning("BfiOnly: EGL HDR10 probe failed: " + t.getMessage());
-            return false;
-        } finally {
-            try {
-                EGL14.eglTerminate(display);
-            } catch (Throwable t) {
-                // EGL display may already be terminated; safe to ignore.
-            }
-        }
-    }
-
-    // Process-wide cache for the HDR10 EGL probe. AtomicReference (not
-    // AtomicBoolean) so we can distinguish "not probed yet" (null) from
-    // "probed, returned false" (Boolean.FALSE).
-    private static final java.util.concurrent.atomic.AtomicReference<Boolean> sHdr10EglProbeResult =
-            new java.util.concurrent.atomic.AtomicReference<>(null);
-    private static final Object sHdr10EglProbeLock = new Object();
-
     /**
      * Returns the current EGL window surface width, or 0 if the surface is
      * not yet created or the query fails. The width reflects the actual
@@ -259,13 +181,11 @@ public final class EglPostProcessContext {
         extPixelFormatFloat = eglExtensions.contains("EGL_EXT_pixel_format_float");
         extColorspaceBt2020Pq = eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_pq");
         extColorspaceBt2020Linear = eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_linear");
-        extColorspaceDisplayP3 = eglExtensions.contains("EGL_EXT_gl_colorspace_display_p3_passthrough");
 
         LimeLog.info("PostProcess: EGL ext scRGB_linear=" + extColorspaceScrgbLinear
                 + " pixelFormatFloat=" + extPixelFormatFloat
                 + " BT2020_PQ=" + extColorspaceBt2020Pq
-                + " BT2020_linear=" + extColorspaceBt2020Linear
-                + " DisplayP3=" + extColorspaceDisplayP3);
+                + " BT2020_linear=" + extColorspaceBt2020Linear);
     }
 
     private EGLConfig chooseConfig(String mode) {
@@ -294,16 +214,6 @@ public final class EglPostProcessContext {
                         EGL14.EGL_GREEN_SIZE, 10,
                         EGL14.EGL_BLUE_SIZE, 10,
                         EGL14.EGL_ALPHA_SIZE, 2
-                };
-                renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
-                break;
-            case "Display P3":
-                if (!extColorspaceDisplayP3) return null;
-                baseAttribs = new int[] {
-                        EGL14.EGL_RED_SIZE, 8,
-                        EGL14.EGL_GREEN_SIZE, 8,
-                        EGL14.EGL_BLUE_SIZE, 8,
-                        EGL14.EGL_ALPHA_SIZE, 8
                 };
                 renderableType = EGL_OPENGL_ES3_BIT | EGL14.EGL_OPENGL_ES2_BIT;
                 break;
@@ -422,9 +332,6 @@ public final class EglPostProcessContext {
                 case EGL_GL_COLORSPACE_BT2020_LINEAR_EXT:
                     csName = "BT2020_linear";
                     break;
-                case EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT:
-                    csName = "Display_P3";
-                    break;
                 case EGL_GL_COLORSPACE_SRGB_KHR:
                     csName = "sRGB";
                     break;
@@ -466,9 +373,6 @@ public final class EglPostProcessContext {
                 break;
             case "HDR10":
                 colorspaceValue = EGL_GL_COLORSPACE_BT2020_PQ_EXT;
-                break;
-            case "Display P3":
-                colorspaceValue = EGL_GL_COLORSPACE_DISPLAY_P3_PASSTHROUGH_EXT;
                 break;
             default:
                 hasColorspace = false;
@@ -516,8 +420,6 @@ public final class EglPostProcessContext {
                 return new String[] {"HDR10", "SDR"};
             case "scRGB":
                 return new String[] {"scRGB", "SDR"};
-            case "Display P3":
-                return new String[] {"Display P3", "SDR"};
             default:
                 return new String[] {"SDR"};
         }

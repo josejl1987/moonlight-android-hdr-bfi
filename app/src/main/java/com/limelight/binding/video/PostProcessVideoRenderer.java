@@ -3,13 +3,10 @@ package com.limelight.binding.video;
 import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.opengl.GLES20;
-import android.opengl.GLES30;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.view.Choreographer;
-import android.view.Display;
 import android.view.Surface;
-import android.view.Window;
 
 import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
@@ -35,8 +32,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private final float streamFps;
     private final float displayRefreshRate;
     private final boolean hostHdrStreamActive;
-    private final Window window;
-    private final Display display;
     private final PostProcessStatusListener statusListener;
 
     private SurfaceTexture surfaceTexture;
@@ -48,7 +43,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     private int program;
     private int oesAdapterProgram;
-    private int tonemapProgram;
     private int textureId;
     private int sourceTexture2d;
     private int sourceFramebuffer;
@@ -64,11 +58,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private final BfiScheduler bfiScheduler = new BfiScheduler();
     private final LibretroHdrUniforms hdrUniforms = new LibretroHdrUniforms();
 
-    private volatile Decision lastDecision;
     private boolean lastHdrModeActive;
     private Choreographer choreographer;
     private final Choreographer.FrameCallback renderFrameCallback = this::onVsyncFrame;
-    private PostProcessCapabilities postProcessCapabilities;
     private String requestedEglMode = "SDR";
     private int surfaceWidth;
     private int surfaceHeight;
@@ -88,25 +80,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int uHdr10Loc;
     private int uHdrModeLoc;
     private int uTextureLoc;
-
-    // libretro HDR tonemap/readback shader uniform locations.
-    private int tMvpLoc;
-    private int tSourceSizeLoc;
-    private int tOutputSizeLoc;
-    private int tBrightnessNitsLoc;
-    private int tInverseTonemapLoc;
-    private int tHdr10Loc;
-    private int tHdrModeLoc;
-    private int tTextureLoc;
-
-    // Readback/tonemap pipeline. Allocated lazily on first readback call at
-    // the current EGL surface dimensions, then reused. Recreated if the size
-    // changes (e.g. rotation, PiP, display mode switch).
-    private int readbackSourceTex;
-    private int readbackTargetTex;
-    private int readbackFbo;
-    private int readbackWidth;
-    private int readbackHeight;
 
     private long lastFrameArrivalNs;
     private long lastSuccessfulUpdateTexImageNs;
@@ -143,8 +116,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             float streamFps,
             float displayRefreshRate,
             boolean hostHdrStreamActive,
-            Window window,
-            Display display,
             PostProcessStatusListener statusListener
     ) {
         this.context = context;
@@ -153,18 +124,12 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         this.streamFps = streamFps;
         this.displayRefreshRate = displayRefreshRate;
         this.hostHdrStreamActive = hostHdrStreamActive;
-        this.window = window;
-        this.display = display;
         this.statusListener = statusListener;
         this.recoveryFailed = false;
     }
 
     public Surface getCodecSurface() {
         return codecSurface;
-    }
-
-    public Decision getLastDecision() {
-        return lastDecision;
     }
 
     public boolean startBlocking() {
@@ -249,79 +214,24 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         stop();
     }
 
-    public static final class Decision {
-        public final boolean enabled;
-        public final String  reason;
-        public final boolean bfiUseful;
-        public final boolean hdrUseful;
-        public final int     mode;
-        public final float   requiredHz;
-
-        public Decision(boolean enabled, String reason,
-                        boolean bfiUseful, boolean hdrUseful,
-                        int mode, float requiredHz) {
-            this.enabled = enabled;
-            this.reason = reason;
-            this.bfiUseful = bfiUseful;
-            this.hdrUseful = hdrUseful;
-            this.mode = mode;
-            this.requiredHz = requiredHz;
-        }
-    }
-
-    public static Decision decide(
-            PreferenceConfiguration prefs,
-            float displayRefreshRate,
-            boolean hostHdrStreamActive
-    ) {
-        int mode = prefs.postProcessRendererMode;
-        int darkFrames = Math.max(1, prefs.videoBfiDarkFrames);
-        float required = prefs.fps * (1.0f + darkFrames);
-        boolean bfiUseful = prefs.videoBlackFrameInsertion
-                && displayRefreshRate > 0
-                && Math.abs(displayRefreshRate - required) <= 3.0f;
-        boolean hdrUseful = prefs.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF;
-
-        if (mode == PreferenceConfiguration.POST_PROCESS_OFF) {
-            String r = "BFI is off: set Post-process renderer to Auto or Force in Stream Settings";
-            LimeLog.info("PostProcess: " + r);
-            return new Decision(false, r, false, hdrUseful, mode, required);
-        }
-
-        if (hostHdrStreamActive) {
-            String r = "BFI is unavailable: 'Enable HDR' is on (host HDR stream). "
-                    + "BFI needs the libretro post-process path. "
-                    + "Turn off the legacy HDR checkbox to use BFI.";
-            LimeLog.warning("PostProcess: " + r);
-            return new Decision(false, r, false, hdrUseful, mode, required);
-        }
-
-        if (displayRefreshRate <= 0) {
-            String r = "BFI is unavailable: invalid display refresh rate (" + (int)displayRefreshRate + " Hz)";
-            LimeLog.warning("PostProcess: " + r);
-            return new Decision(false, r, false, false, mode, required);
-        }
-
-        if (mode == PreferenceConfiguration.POST_PROCESS_FORCE) {
-            String r = "Post-process renderer forced on";
-            LimeLog.info("PostProcess: " + r);
-            return new Decision(true, r, bfiUseful, hdrUseful, mode, required);
-        }
-
-        String r = "AUTO: bfiUseful=" + bfiUseful
-                + " (need " + (int)required + " Hz, have " + (int)displayRefreshRate + " Hz)"
-                + " hdrUseful=" + hdrUseful;
-        boolean enabled = bfiUseful || hdrUseful;
-        LimeLog.info("PostProcess: " + r + " -> " + (enabled ? "enabled" : "skipped"));
-        return new Decision(enabled, r, bfiUseful, hdrUseful, mode, required);
-    }
-
     public static boolean shouldUse(
             PreferenceConfiguration prefs,
             float displayRefreshRate,
             boolean hostHdrStreamActive
     ) {
-        return decide(prefs, displayRefreshRate, hostHdrStreamActive).enabled;
+        int mode = prefs.postProcessRendererMode;
+        if (mode == PreferenceConfiguration.POST_PROCESS_OFF || hostHdrStreamActive) {
+            return false;
+        }
+        if (mode == PreferenceConfiguration.POST_PROCESS_FORCE) {
+            return true;
+        }
+
+        boolean hdrUseful = prefs.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF;
+        boolean bfiUseful = prefs.videoBlackFrameInsertion
+                && BfiScheduler.canEnable(prefs.fps, displayRefreshRate, prefs.videoBfiDarkFrames);
+
+        return hdrUseful || bfiUseful;
     }
 
     @Override
@@ -331,9 +241,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     private void initGl() {
-        PostProcessCapabilities caps = PostProcessCapabilities.probe(context, window, display);
-        postProcessCapabilities = caps;
-        String targetMode = determineTargetMode(caps);
+        String targetMode = requestedTargetMode();
         requestedEglMode = targetMode;
 
         eglContext = new EglPostProcessContext(outputSurface, targetMode);
@@ -406,25 +314,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             if (initLatch != null) initLatch.countDown();
             return;
         }
-
-        String tonemapFragmentSource = loadTonemapFragmentWithIncludes();
-        tonemapProgram = createProgram(vertexSource, tonemapFragmentSource);
-        if (tonemapProgram == 0) {
-            LimeLog.warning("PostProcess: tonemap shader compile failed");
-            running = false;
-            recoveryFailed = true;
-            if (initLatch != null) initLatch.countDown();
-            return;
-        }
-
-        tMvpLoc            = GLES20.glGetUniformLocation(tonemapProgram, "MVP");
-        tSourceSizeLoc     = GLES20.glGetUniformLocation(tonemapProgram, "SourceSize");
-        tOutputSizeLoc     = GLES20.glGetUniformLocation(tonemapProgram, "OutputSize");
-        tBrightnessNitsLoc = GLES20.glGetUniformLocation(tonemapProgram, "BrightnessNits");
-        tInverseTonemapLoc = GLES20.glGetUniformLocation(tonemapProgram, "InverseTonemap");
-        tHdr10Loc          = GLES20.glGetUniformLocation(tonemapProgram, "HDR10");
-        tHdrModeLoc        = GLES20.glGetUniformLocation(tonemapProgram, "HDRMode");
-        tTextureLoc        = GLES20.glGetUniformLocation(tonemapProgram, "Source");
 
         uMvpLoc            = GLES20.glGetUniformLocation(program, "MVP");
         uSourceSizeLoc     = GLES20.glGetUniformLocation(program, "SourceSize");
@@ -653,10 +542,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 GLES20.glDeleteProgram(oesAdapterProgram);
                 oesAdapterProgram = 0;
             }
-            if (tonemapProgram != 0) {
-                GLES20.glDeleteProgram(tonemapProgram);
-                tonemapProgram = 0;
-            }
             if (sourceFramebuffer != 0) {
                 GLES20.glDeleteFramebuffers(1, new int[]{sourceFramebuffer}, 0);
                 sourceFramebuffer = 0;
@@ -665,20 +550,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 GLES20.glDeleteTextures(1, new int[]{sourceTexture2d}, 0);
                 sourceTexture2d = 0;
             }
-            if (readbackFbo != 0) {
-                GLES20.glDeleteFramebuffers(1, new int[]{readbackFbo}, 0);
-                readbackFbo = 0;
-            }
-            if (readbackSourceTex != 0) {
-                GLES20.glDeleteTextures(1, new int[]{readbackSourceTex}, 0);
-                readbackSourceTex = 0;
-            }
-            if (readbackTargetTex != 0) {
-                GLES20.glDeleteTextures(1, new int[]{readbackTargetTex}, 0);
-                readbackTargetTex = 0;
-            }
-            readbackWidth = 0;
-            readbackHeight = 0;
             if (textureId != 0) {
                 GLES20.glDeleteTextures(1, new int[]{textureId}, 0);
                 textureId = 0;
@@ -719,12 +590,12 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
         boolean bfiActive = prefConfig.videoBlackFrameInsertion
-                && bfiScheduler.canEnable(streamFps, displayRefreshRate, darkFrames);
+                && BfiScheduler.canEnable(streamFps, displayRefreshRate, darkFrames);
         bfiScheduler.configure(bfiActive, darkFrames);
 
         String reconnectMessage = null;
-        if (logChanges && eglContext != null && postProcessCapabilities != null) {
-            String desiredTargetMode = determineTargetMode(postProcessCapabilities);
+        if (logChanges && eglContext != null) {
+            String desiredTargetMode = requestedTargetMode();
             if (!desiredTargetMode.equals(requestedEglMode)) {
                 reconnectMessage = "HDR output mode changed. Reconnect stream to recreate EGL surface.";
                 LimeLog.info("PostProcess: " + reconnectMessage + " requested=" + requestedEglMode
@@ -751,7 +622,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                     + " darkFrames=" + bfiScheduler.getDarkFrames());
         }
 
-        lastDecision = decide(prefConfig, displayRefreshRate, hostHdrStreamActive);
         publishStatus();
         notifyHdrModeChanged();
         notifyHdrModeUnavailableIfNeeded();
@@ -816,43 +686,18 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         statusListener.onPostProcessStatusUpdate(sb.toString());
     }
 
-    private String determineTargetMode(PostProcessCapabilities caps) {
-        if (!caps.supportsPostProcess) {
+    private String requestedTargetMode() {
+        if (hostHdrStreamActive) {
             return "SDR";
         }
-        int mode = resolveHdrMode(caps);
-        if (mode == LibretroHdrUniforms.HDR_MODE_HDR10) {
-            return "HDR10";
-        }
-        if (mode == LibretroHdrUniforms.HDR_MODE_SCRGB
-                || mode == LibretroHdrUniforms.HDR_MODE_PQ_TO_SCRGB) {
-            return caps.supportsScRgb ? "scRGB" : "SDR";
-        }
-        return "SDR";
-    }
 
-    private int resolveHdrMode(PostProcessCapabilities caps) {
-        return resolveHdrMode(prefConfig.videoHdrMode, caps.supportsScRgb, caps.supportsHdr10, hostHdrStreamActive);
-    }
-
-    static int resolveHdrMode(int prefHdrMode, boolean supportsScRgb, boolean supportsHdr10, boolean hostHdrStreamActive) {
-        if (hostHdrStreamActive) {
-            return LibretroHdrUniforms.HDR_MODE_OFF;
-        }
-
-        switch (prefHdrMode) {
-            case LibretroHdrUniforms.HDR_MODE_SCRGB:
-                return supportsScRgb ? LibretroHdrUniforms.HDR_MODE_SCRGB : LibretroHdrUniforms.HDR_MODE_OFF;
-            case LibretroHdrUniforms.HDR_MODE_PQ_TO_SCRGB:
-                // PQ HDR10 input → scRGB output. Keep this off unless the
-                // output surface is actually scRGB-capable.
-                return supportsScRgb ? LibretroHdrUniforms.HDR_MODE_PQ_TO_SCRGB : LibretroHdrUniforms.HDR_MODE_OFF;
-            case LibretroHdrUniforms.HDR_MODE_HDR10:
-                // HDR10/PQ output must not silently fall back to scRGB because
-                // the transfer function changes.
-                return supportsHdr10 ? LibretroHdrUniforms.HDR_MODE_HDR10 : LibretroHdrUniforms.HDR_MODE_OFF;
+        switch (prefConfig.videoHdrMode) {
+            case PreferenceConfiguration.VIDEO_HDR_HDR10:
+                return "HDR10";
+            case PreferenceConfiguration.VIDEO_HDR_SCRGB:
+                return "scRGB";
             default:
-                return LibretroHdrUniforms.HDR_MODE_OFF;
+                return "SDR";
         }
     }
 
@@ -932,214 +777,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         return composite.replace("#include \"libretro_hdr_common.glsl\"", common);
-    }
-
-    private String loadTonemapFragmentWithIncludes() {
-        // Same #include splice as the composite fragment, but against the
-        // tonemap/readback shader.
-        String tonemap = readRawResource(com.limelight.R.raw.libretro_hdr_tonemap);
-        String common  = readRawResource(com.limelight.R.raw.libretro_hdr_common);
-
-        if (tonemap == null || common == null) {
-            LimeLog.warning("PostProcess: missing libretro HDR tonemap shader source");
-            return tonemap;
-        }
-
-        return tonemap.replace("#include \"libretro_hdr_common.glsl\"", common);
-    }
-
-    /**
-     * Read back the current backbuffer as an SDR-encoded RGBA8 byte buffer,
-     * routed through the libretro HDR tonemap shader. Mirrors
-     * {@code vulkan_run_hdr_pipeline()} in RetroArch's screenshot/recording
-     * path: HDR10 PQ is decoded + tonemapped, scRGB is descaled, SDR is
-     * passed through (with sRGB OETF applied so the bytes look right in any
-     * standard sRGB viewer).
-     *
-     * <p>The returned array is row-major RGBA8, with row 0 at the bottom
-     * (matches {@code glReadPixels} ordering). Size is
-     * {@code width * height * 4} bytes. Returns {@code null} if the readback
-     * pipeline is not yet initialized (e.g. EGL not ready, or tonemap shader
-     * failed to compile).</p>
-     */
-    public byte[] readbackTonemapRgba8(int width, int height) {
-        if (!running || recoveryFailed) {
-            return null;
-        }
-        Handler handler = renderHandler;
-        if (handler == null) {
-            return null;
-        }
-        final int w = width;
-        final int h = height;
-        final byte[][] holder = new byte[1][];
-        final boolean[] done = new boolean[1];
-        handler.post(() -> {
-            try {
-                holder[0] = doReadbackTonemapRgba8(w, h);
-            } catch (Throwable t) {
-                LimeLog.warning("PostProcess: readback failed: " + t.getMessage());
-                holder[0] = null;
-            } finally {
-                synchronized (done) {
-                    done[0] = true;
-                    done.notify();
-                }
-            }
-        });
-        synchronized (done) {
-            try {
-                if (!done[0]) {
-                    done.wait(2000);
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                return null;
-            }
-        }
-        return holder[0];
-    }
-
-    private byte[] doReadbackTonemapRgba8(int width, int height) {
-        if (tonemapProgram == 0 || eglContext == null || !eglContext.makeCurrent()) {
-            return null;
-        }
-        if (width <= 0 || height <= 0) {
-            return null;
-        }
-
-        // (Re)allocate readback buffers if the surface size changed.
-        if (readbackFbo == 0 || readbackWidth != width || readbackHeight != height) {
-            if (readbackFbo != 0) {
-                GLES20.glDeleteFramebuffers(1, new int[]{readbackFbo}, 0);
-                readbackFbo = 0;
-            }
-            if (readbackSourceTex != 0) {
-                GLES20.glDeleteTextures(1, new int[]{readbackSourceTex}, 0);
-                readbackSourceTex = 0;
-            }
-            if (readbackTargetTex != 0) {
-                GLES20.glDeleteTextures(1, new int[]{readbackTargetTex}, 0);
-                readbackTargetTex = 0;
-            }
-
-            int[] tex = new int[1];
-            // Source: FP16 RGBA — accepts FP16 (scRGB) via direct copy, and
-            // RGB10A2 (HDR10) / RGBA8 (SDR) via format conversion through
-            // glCopyTexImage2D.
-            GLES20.glGenTextures(1, tex, 0);
-            readbackSourceTex = tex[0];
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, readbackSourceTex);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
-                    width, height, 0, GLES20.GL_RGBA, GLES30.GL_HALF_FLOAT, null);
-
-            // Target: RGBA8 — what the tonemap shader writes into.
-            GLES20.glGenTextures(1, tex, 0);
-            readbackTargetTex = tex[0];
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, readbackTargetTex);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-            GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8,
-                    width, height, 0, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
-
-            int[] fbo = new int[1];
-            GLES20.glGenFramebuffers(1, fbo, 0);
-            readbackFbo = fbo[0];
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, readbackFbo);
-            GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-                    GLES20.GL_TEXTURE_2D, readbackTargetTex, 0);
-
-            int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
-            if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-                LimeLog.warning("PostProcess: readback framebuffer incomplete: 0x"
-                        + Integer.toHexString(status));
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-                GLES20.glDeleteFramebuffers(1, new int[]{readbackFbo}, 0);
-                GLES20.glDeleteTextures(2, new int[]{readbackSourceTex, readbackTargetTex}, 0);
-                readbackFbo = 0;
-                readbackSourceTex = 0;
-                readbackTargetTex = 0;
-                return null;
-            }
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-            readbackWidth = width;
-            readbackHeight = height;
-        }
-
-        int prevFbo;
-        int[] prevFboArr = new int[1];
-        GLES20.glGetIntegerv(GLES20.GL_FRAMEBUFFER_BINDING, prevFboArr, 0);
-        prevFbo = prevFboArr[0];
-
-        int[] prevViewport = new int[4];
-        GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, prevViewport, 0);
-
-        try {
-            // 1. Copy current EGL surface → FP16 source texture.
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, readbackSourceTex);
-            GLES20.glCopyTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES30.GL_RGBA16F,
-                    0, 0, width, height, 0);
-
-            // 2. Bind RGBA8 target FBO and run the tonemap shader.
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, readbackFbo);
-            GLES20.glViewport(0, 0, width, height);
-            GLES20.glDisable(GLES20.GL_DEPTH_TEST);
-            GLES20.glDisable(GLES20.GL_BLEND);
-            GLES20.glClearColor(0f, 0f, 0f, 1f);
-            GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-            GLES20.glUseProgram(tonemapProgram);
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, readbackSourceTex);
-            if (tTextureLoc >= 0) GLES20.glUniform1i(tTextureLoc, 0);
-            if (tMvpLoc >= 0) {
-                GLES20.glUniformMatrix4fv(tMvpLoc, 1, false, hdrUniforms.mvp, 0);
-            }
-            if (tSourceSizeLoc >= 0) {
-                GLES20.glUniform4f(tSourceSizeLoc,
-                        hdrUniforms.sourceWidth, hdrUniforms.sourceHeight,
-                        1.0f / Math.max(hdrUniforms.sourceWidth, 1.0f),
-                        1.0f / Math.max(hdrUniforms.sourceHeight, 1.0f));
-            }
-            if (tOutputSizeLoc >= 0) {
-                GLES20.glUniform4f(tOutputSizeLoc,
-                        hdrUniforms.outputWidth, hdrUniforms.outputHeight,
-                        1.0f / Math.max(hdrUniforms.outputWidth, 1.0f),
-                        1.0f / Math.max(hdrUniforms.outputHeight, 1.0f));
-            }
-            if (tBrightnessNitsLoc >= 0) GLES20.glUniform1f(tBrightnessNitsLoc, hdrUniforms.brightnessNits);
-            if (tInverseTonemapLoc >= 0) GLES20.glUniform1f(tInverseTonemapLoc, hdrUniforms.inverseTonemap);
-            if (tHdr10Loc >= 0) GLES20.glUniform1f(tHdr10Loc, hdrUniforms.hdr10);
-            if (tHdrModeLoc >= 0) GLES20.glUniform1i(tHdrModeLoc, hdrUniforms.hdrMode);
-
-            int posHandle = GLES20.glGetAttribLocation(tonemapProgram, "aPosition");
-            int texHandle = GLES20.glGetAttribLocation(tonemapProgram, "aTexCoord");
-            GLES20.glEnableVertexAttribArray(posHandle);
-            GLES20.glVertexAttribPointer(posHandle, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
-            GLES20.glEnableVertexAttribArray(texHandle);
-            GLES20.glVertexAttribPointer(texHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-            GLES20.glDisableVertexAttribArray(posHandle);
-            GLES20.glDisableVertexAttribArray(texHandle);
-
-            // 3. Read pixels from the RGBA8 FBO.
-            ByteBuffer buf = ByteBuffer.allocateDirect(width * height * 4);
-            buf.order(ByteOrder.nativeOrder());
-            GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
-            buf.rewind();
-            byte[] out = new byte[width * height * 4];
-            buf.get(out);
-            return out;
-        } finally {
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, prevFbo);
-            GLES20.glViewport(prevViewport[0], prevViewport[1], prevViewport[2], prevViewport[3]);
-        }
     }
 
     private String readRawResource(int resId) {
@@ -1238,15 +875,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     private void notifyHdrModeUnavailableIfNeeded() {
-        if (statusListener == null || postProcessCapabilities == null || hostHdrStreamActive) {
+        if (statusListener == null || eglContext == null || hostHdrStreamActive) {
             return;
         }
-        int resolved = resolveHdrMode(prefConfig.videoHdrMode,
-                postProcessCapabilities.supportsScRgb,
-                postProcessCapabilities.supportsHdr10,
-                false);
         if (prefConfig.videoHdrMode != LibretroHdrUniforms.HDR_MODE_OFF
-                && resolved == LibretroHdrUniforms.HDR_MODE_OFF) {
+                && hdrUniforms.hdrMode == LibretroHdrUniforms.HDR_MODE_OFF) {
             statusListener.onPostProcessStatusUpdate("HDR output unavailable; using SDR");
         }
     }

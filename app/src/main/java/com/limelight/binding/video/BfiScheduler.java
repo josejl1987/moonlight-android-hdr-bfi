@@ -5,7 +5,7 @@ public final class BfiScheduler {
     private int darkFrames = 1;
     private int phase;
 
-    public boolean canEnable(float streamFps, float displayHz, int darkFrames) {
+    public static boolean canEnable(float streamFps, float displayHz, int darkFrames) {
         if (streamFps <= 0f || displayHz <= 0f) {
             return false;
         }

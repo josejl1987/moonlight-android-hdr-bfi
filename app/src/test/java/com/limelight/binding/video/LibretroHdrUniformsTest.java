@@ -75,19 +75,4 @@ public class LibretroHdrUniformsTest {
         assertEquals(0.0f, u.hdr10, 0.0f);
     }
 
-    @Test
-    public void resolveHdrModeDoesNotSilentlySubstituteHdr10() {
-        assertEquals(LibretroHdrUniforms.HDR_MODE_HDR10,
-                PostProcessVideoRenderer.resolveHdrMode(
-                        LibretroHdrUniforms.HDR_MODE_HDR10,
-                        false,
-                        true,
-                        false));
-        assertEquals(LibretroHdrUniforms.HDR_MODE_OFF,
-                PostProcessVideoRenderer.resolveHdrMode(
-                        LibretroHdrUniforms.HDR_MODE_HDR10,
-                        true,
-                        false,
-                        false));
-    }
 }

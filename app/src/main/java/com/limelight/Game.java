@@ -106,11 +106,6 @@ import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.ArrayAdapter;
-import android.widget.CheckBox;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
-import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ImageButton;
@@ -877,21 +872,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // The connection will be started when the surface gets created
         //streamContainer.getHolder().addCallback(this);
 
-        final boolean finalWillStreamHdr = willStreamHdr;
-        final Display finalCurrentDisplay = currentDisplay;
+                final boolean finalWillStreamHdr = willStreamHdr;
         streamContainer.setOnSurfaceAvailable(() -> {
             if (!attemptedConnection) {
                 attemptedConnection = true;
 
                 Surface renderSurface = streamContainer.getSurface();
 
-                PostProcessVideoRenderer.Decision ppDecision =
-                        PostProcessVideoRenderer.decide(
-                                prefConfig,
-                                displayRefreshRate,
-                                finalWillStreamHdr);
-
-                if (!ppDecision.enabled) {
+                if (!PostProcessVideoRenderer.shouldUse(prefConfig, displayRefreshRate, finalWillStreamHdr)) {
                     decoderRenderer.setRenderTarget(renderSurface);
                     showPostProcessOverlay(false);
                     conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
@@ -907,8 +895,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                             prefConfig.fps,
                             displayRefreshRate,
                             finalWillStreamHdr,
-                            getWindow(),
-                            finalCurrentDisplay,
                             Game.this
                     );
 
@@ -4037,146 +4023,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 }
             }
         });
-    }
-
-    public void showPostProcessQuickPanel() {
-        // Always allow the panel so the user can adjust settings, even if
-        // the renderer is inactive (init failed, currently stopped, etc.).
-        // Settings are persisted and applied on the next connection.
-        ScrollView scrollView = new ScrollView(this);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        int pad = (int) (getResources().getDisplayMetrics().density * 16);
-        root.setPadding(pad, pad, pad, pad);
-        scrollView.addView(root, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        // Diagnostic status
-        TextView status = new TextView(this);
-        status.setText(postProcessRenderer != null
-                ? "Renderer: active \u2014 brightness/BFI apply live; HDR mode changes need reconnect"
-                : "Renderer: inactive \u2014 settings apply on next stream start");
-        status.setPadding(0, 0, 0, pad);
-        root.addView(status);
-
-        // Renderer mode
-        final Spinner rendererSpinner = createSpinner(root,
-                getString(R.string.title_postprocess_renderer),
-                R.array.postprocess_renderer_names,
-                R.array.postprocess_renderer_values,
-                prefConfig.postProcessRendererMode);
-
-        // HDR mode
-        final Spinner hdrModeSpinner = createSpinner(root,
-                getString(R.string.title_video_hdr_mode),
-                R.array.video_hdr_mode_names,
-                R.array.video_hdr_mode_values,
-                prefConfig.videoHdrMode);
-
-        // Brightness
-        TextView brightnessLabel = new TextView(this);
-        brightnessLabel.setText(getString(R.string.title_video_hdr_paper_white));
-        brightnessLabel.setPadding(0, 0, 0, 8);
-        root.addView(brightnessLabel);
-        final android.widget.EditText brightnessEdit = new android.widget.EditText(this);
-        brightnessEdit.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
-        brightnessEdit.setText(Integer.toString(prefConfig.videoHdrPaperWhiteNits));
-        root.addView(brightnessEdit);
-
-        // BFI
-        final CheckBox bfiCheck = new CheckBox(this);
-        bfiCheck.setText(R.string.title_video_bfi);
-        bfiCheck.setChecked(prefConfig.videoBlackFrameInsertion);
-        root.addView(bfiCheck);
-
-        // BFI dark frames
-        final Spinner darkFrameSpinner = createSpinner(root,
-                getString(R.string.title_video_bfi_dark_frames),
-                R.array.video_bfi_dark_frames_names,
-                R.array.video_bfi_dark_frames_values,
-                prefConfig.videoBfiDarkFrames);
-
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.game_menu_postprocess_quick_setup)
-                .setView(scrollView)
-                .setPositiveButton("Apply", (dialog, which) -> {
-                    prefConfig.postProcessRendererMode = spinnerValue(rendererSpinner);
-                    prefConfig.videoHdrMode = spinnerValue(hdrModeSpinner);
-                    try {
-                        prefConfig.videoHdrPaperWhiteNits = Integer.parseInt(brightnessEdit.getText().toString().trim());
-                    } catch (NumberFormatException e) {
-                        prefConfig.videoHdrPaperWhiteNits = 200;
-                    }
-                    prefConfig.videoBlackFrameInsertion = bfiCheck.isChecked();
-                    prefConfig.videoBfiDarkFrames = spinnerValue(darkFrameSpinner);
-                    persistAndApplyPostProcessSettings();
-                })
-                .setNeutralButton("Cancel", null)
-                .show();
-    }
-
-    private Spinner createSpinner(LinearLayout parent, String label,
-                                   int namesArrayRes, int valuesArrayRes, int currentValue) {
-        TextView textView = new TextView(this);
-        textView.setText(label);
-        textView.setPadding(0, 0, 0, 8);
-        parent.addView(textView);
-
-        Spinner spinner = new Spinner(this);
-        String[] names = getResources().getStringArray(namesArrayRes);
-        int[] values = intArray(valuesArrayRes);
-
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, names);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        spinner.setAdapter(adapter);
-        spinner.setTag(values);
-        spinner.setSelection(indexOfValue(values, currentValue));
-        parent.addView(spinner);
-        return spinner;
-    }
-
-    private int[] intArray(int arrayRes) {
-        String[] strings = getResources().getStringArray(arrayRes);
-        int[] values = new int[strings.length];
-        for (int i = 0; i < strings.length; i++) {
-            values[i] = Integer.parseInt(strings[i]);
-        }
-        return values;
-    }
-
-    private int indexOfValue(int[] values, int currentValue) {
-        for (int i = 0; i < values.length; i++) {
-            if (values[i] == currentValue) {
-                return i;
-            }
-        }
-        return 0;
-    }
-
-    private int spinnerValue(Spinner spinner) {
-        int position = spinner.getSelectedItemPosition();
-        int[] values = (int[]) spinner.getTag();
-        if (values == null || position < 0 || position >= values.length) {
-            return 0;
-        }
-        return values[position];
-    }
-
-    private void persistAndApplyPostProcessSettings() {
-        SharedPreferences.Editor editor = PreferenceManager.getDefaultSharedPreferences(this).edit();
-        PreferenceConfiguration.writePostProcessPreferences(editor, prefConfig);
-        editor.apply();
-
-        if (postProcessRenderer != null) {
-            postProcessRenderer.updateSettings();
-            showPostProcessOverlay(true);
-        } else {
-            Toast.makeText(this,
-                    "Saved. Restart stream or set renderer to Force before connecting.",
-                    Toast.LENGTH_LONG).show();
-        }
     }
 
     private void releasePostProcessRenderer() {

@@ -8,16 +8,12 @@ import static org.junit.Assert.assertTrue;
 public class BfiSchedulerTest {
     @Test
     public void canEnableMatchesDisplayRefreshForMultipleDarkFrames() {
-        BfiScheduler scheduler = new BfiScheduler();
-        scheduler.configure(true, 1);
+        assertTrue(BfiScheduler.canEnable(60f, 120f, 1));
+        assertFalse(BfiScheduler.canEnable(60f, 180f, 1));
+        assertTrue(BfiScheduler.canEnable(59.94f, 120f, 1));
 
-        assertTrue(scheduler.canEnable(60f, 120f, 1));
-        assertFalse(scheduler.canEnable(60f, 180f, 1));
-        assertTrue(scheduler.canEnable(59.94f, 120f, 1));
-
-        scheduler.configure(true, 2);
-        assertTrue(scheduler.canEnable(60f, 180f, 2));
-        assertFalse(scheduler.canEnable(60f, 120f, 2));
+        assertTrue(BfiScheduler.canEnable(60f, 180f, 2));
+        assertFalse(BfiScheduler.canEnable(60f, 120f, 2));
     }
 
     @Test
