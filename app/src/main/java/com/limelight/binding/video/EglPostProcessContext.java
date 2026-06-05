@@ -8,6 +8,7 @@ import android.opengl.EGLSurface;
 import android.opengl.GLES30;
 import android.view.Surface;
 
+import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
 
 public final class EglPostProcessContext {
@@ -17,7 +18,6 @@ public final class EglPostProcessContext {
     private static final int EGL_GL_COLORSPACE_BT2020_PQ_EXT = 0x3340;
     private static final int EGL_GL_COLORSPACE_SCRGB_LINEAR_EXT = 0x3350;
     private static final int EGL_GL_COLORSPACE_SCRGB_EXT = 0x3351;
-    private static final int EGL_GL_COLORSPACE_BT2020_LINEAR_EXT = 0x333F;
     private static final int EGL_COLOR_COMPONENT_TYPE_EXT = 0x3339;
     private static final int EGL_COLOR_COMPONENT_TYPE_FIXED_EXT = 0x333A;
     private static final int EGL_COLOR_COMPONENT_TYPE_FLOAT_EXT = 0x333B;
@@ -38,8 +38,6 @@ public final class EglPostProcessContext {
     private boolean extColorspaceScrgbLinear;
     private boolean extPixelFormatFloat;
     private boolean extColorspaceBt2020Pq;
-    private boolean extColorspaceBt2020Linear;
-
     public EglPostProcessContext(Surface outputSurface, String requestMode) {
         this.outputSurface = outputSurface;
         this.requestMode = requestMode;
@@ -180,12 +178,9 @@ public final class EglPostProcessContext {
         extColorspaceScrgbLinear = eglExtensions.contains("EGL_EXT_gl_colorspace_scrgb_linear");
         extPixelFormatFloat = eglExtensions.contains("EGL_EXT_pixel_format_float");
         extColorspaceBt2020Pq = eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_pq");
-        extColorspaceBt2020Linear = eglExtensions.contains("EGL_EXT_gl_colorspace_bt2020_linear");
-
         LimeLog.info("PostProcess: EGL ext scRGB_linear=" + extColorspaceScrgbLinear
                 + " pixelFormatFloat=" + extPixelFormatFloat
-                + " BT2020_PQ=" + extColorspaceBt2020Pq
-                + " BT2020_linear=" + extColorspaceBt2020Linear);
+                + " BT2020_PQ=" + extColorspaceBt2020Pq);
     }
 
     private EGLConfig chooseConfig(String mode) {
@@ -249,7 +244,9 @@ public final class EglPostProcessContext {
             return null;
         }
         EGLConfig config = configs[0];
-        logConfigAttributes(config);
+        if (BuildConfig.DEBUG) {
+            logConfigAttributes(config);
+        }
         return config;
     }
 
@@ -328,9 +325,6 @@ public final class EglPostProcessContext {
                     break;
                 case EGL_GL_COLORSPACE_BT2020_PQ_EXT:
                     csName = "BT2020_PQ";
-                    break;
-                case EGL_GL_COLORSPACE_BT2020_LINEAR_EXT:
-                    csName = "BT2020_linear";
                     break;
                 case EGL_GL_COLORSPACE_SRGB_KHR:
                     csName = "sRGB";

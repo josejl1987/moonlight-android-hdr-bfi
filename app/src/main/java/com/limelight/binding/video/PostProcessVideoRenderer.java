@@ -81,9 +81,16 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int uHdrModeLoc;
     private int uTextureLoc;
 
+    // Cached attribute/uniform locations (resolved at init)
+    private int aPositionLoc;
+    private int aTexCoordLoc;
+    private int oesAPositionLoc;
+    private int oesATexCoordLoc;
+    private int oesTransformLoc;
+    private int oesTextureLoc;
+
     private long lastFrameArrivalNs;
     private long lastSuccessfulUpdateTexImageNs;
-    private long lastFrameDrawStartNs;
     private int totalRenderCalls;
     private int framesRendered;
     private int framesSkippedNoInput;
@@ -327,6 +334,14 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         uHdrModeLoc        = GLES20.glGetUniformLocation(program, "HDRMode");
         uTextureLoc        = GLES20.glGetUniformLocation(program, "Source");
 
+        aPositionLoc = GLES20.glGetAttribLocation(program, "aPosition");
+        aTexCoordLoc = GLES20.glGetAttribLocation(program, "aTexCoord");
+
+        oesAPositionLoc = GLES20.glGetAttribLocation(oesAdapterProgram, "aPosition");
+        oesATexCoordLoc = GLES20.glGetAttribLocation(oesAdapterProgram, "aTexCoord");
+        oesTransformLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexTransform");
+        oesTextureLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexture");
+
         quadVertexBuffer = ByteBuffer.allocateDirect(QUAD_VERTICES.length * 4)
                 .order(ByteOrder.nativeOrder())
                 .asFloatBuffer();
@@ -392,7 +407,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             frameAvailable = false;
             hasValidTextureFrame = true;
             lastSuccessfulUpdateTexImageNs = nowNs;
-            lastFrameDrawStartNs = nowNs;
             consumedNewFrame = true;
             int[] viewport = new int[4];
             GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, viewport, 0);
@@ -439,18 +453,15 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
             if (uHdrModeLoc >= 0) GLES20.glUniform1i(uHdrModeLoc, hdrUniforms.hdrMode);
 
-            int positionHandle = GLES20.glGetAttribLocation(program, "aPosition");
-            int texCoordHandle = GLES20.glGetAttribLocation(program, "aTexCoord");
-
-            GLES20.glEnableVertexAttribArray(positionHandle);
-            GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
-            GLES20.glEnableVertexAttribArray(texCoordHandle);
-            GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+            GLES20.glEnableVertexAttribArray(aPositionLoc);
+            GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
+            GLES20.glEnableVertexAttribArray(aTexCoordLoc);
+            GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
 
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
 
-            GLES20.glDisableVertexAttribArray(positionHandle);
-            GLES20.glDisableVertexAttribArray(texCoordHandle);
+            GLES20.glDisableVertexAttribArray(aPositionLoc);
+            GLES20.glDisableVertexAttribArray(aTexCoordLoc);
 
             if (consumedNewFrame) {
                 accumulatedLatencyNs += (nowNs - lastFrameArrivalNs);
@@ -488,7 +499,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private void resetStats() {
         lastFrameArrivalNs = 0;
         lastSuccessfulUpdateTexImageNs = 0;
-        lastFrameDrawStartNs = 0;
         totalRenderCalls = 0;
         framesRendered = 0;
         framesSkippedNoInput = 0;
@@ -740,27 +750,22 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         GLES20.glUseProgram(oesAdapterProgram);
 
-        int posHandle = GLES20.glGetAttribLocation(oesAdapterProgram, "aPosition");
-        int texHandle = GLES20.glGetAttribLocation(oesAdapterProgram, "aTexCoord");
-        int transformLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexTransform");
+        GLES20.glUniformMatrix4fv(oesTransformLoc, 1, false, surfaceTransform, 0);
 
-        GLES20.glUniformMatrix4fv(transformLoc, 1, false, surfaceTransform, 0);
-
-        int adapterTextureLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexture");
-        GLES20.glUniform1i(adapterTextureLoc, 0);
+        GLES20.glUniform1i(oesTextureLoc, 0);
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GL_TEXTURE_EXTERNAL_OES, textureId);
 
-        GLES20.glEnableVertexAttribArray(posHandle);
-        GLES20.glVertexAttribPointer(posHandle, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
-        GLES20.glEnableVertexAttribArray(texHandle);
-        GLES20.glVertexAttribPointer(texHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+        GLES20.glEnableVertexAttribArray(oesAPositionLoc);
+        GLES20.glVertexAttribPointer(oesAPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
+        GLES20.glEnableVertexAttribArray(oesATexCoordLoc);
+        GLES20.glVertexAttribPointer(oesATexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
 
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
 
-        GLES20.glDisableVertexAttribArray(posHandle);
-        GLES20.glDisableVertexAttribArray(texHandle);
+        GLES20.glDisableVertexAttribArray(oesAPositionLoc);
+        GLES20.glDisableVertexAttribArray(oesATexCoordLoc);
 
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
     }
@@ -860,14 +865,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             return;
         }
         applyLibretroHdrMode(hdrModeForActualEglMode());
-    }
-
-    private boolean isAndroidEglFallback() {
-        if (eglContext == null) {
-            return false;
-        }
-        String actualMode = eglContext.getActualMode();
-        return !"SDR".equals(requestedEglMode) && !requestedEglMode.equals(actualMode);
     }
 
     private boolean isHdrModeActive() {

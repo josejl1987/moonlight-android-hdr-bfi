@@ -1035,7 +1035,6 @@ public class StreamSettings extends AppCompatActivity {
                 });
 
                 hdrPref.setOnPreferenceChangeListener((pref, newVal) -> {
-                    Log.i("StreamSettings", "hdr mode changed to " + newVal);
                     boolean on = !"0".equals(newVal);
                     if (ppWhitePref != null) ppWhitePref.setEnabled(on);
                     if (ppGamutPref != null) ppGamutPref.setEnabled(on);
@@ -1045,7 +1044,6 @@ public class StreamSettings extends AppCompatActivity {
                 });
 
                 bfiPref.setOnPreferenceChangeListener((pref, newVal) -> {
-                    Log.i("StreamSettings", "bfi changed to " + newVal);
                     boolean checked = (Boolean) newVal;
                     if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(checked);
                     return true;
@@ -1088,7 +1086,6 @@ public class StreamSettings extends AppCompatActivity {
         protected void reloadSettings() {
             // HACK: We need to let the preference change succeed before reinitializing to ensure
             // it's reflected in the new layout.
-            Log.i("StreamSettings", "scheduling fragment reload in 500ms");
             final Handler h = new Handler();
             h.postDelayed(new Runnable() {
                 @Override
@@ -1096,7 +1093,6 @@ public class StreamSettings extends AppCompatActivity {
                     // Ensure the activity is still open when this timeout expires
                     StreamSettings settingsActivity = (StreamSettings) SettingsFragment.this.getActivity();
                     if (settingsActivity != null) {
-                        Log.i("StreamSettings", "executing scheduled fragment reload");
                         settingsActivity.reloadSettings();
                     }
                 }

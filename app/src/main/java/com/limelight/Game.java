@@ -872,7 +872,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // The connection will be started when the surface gets created
         //streamContainer.getHolder().addCallback(this);
 
-                final boolean finalWillStreamHdr = willStreamHdr;
+        final boolean finalWillStreamHdr = willStreamHdr;
         streamContainer.setOnSurfaceAvailable(() -> {
             if (!attemptedConnection) {
                 attemptedConnection = true;
