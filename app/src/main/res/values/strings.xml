@@ -773,4 +773,18 @@
     <string name="paper_white_title">Paper white calibration</string>
     <string name="paper_white_done">Done</string>
     <string name="paper_white_reset">Reset to 200</string>
+
+    <!-- Test UX: test patterns submenu (Commit 5) -->
+    <string name="game_menu_test_patterns">Test patterns</string>
+    <string name="test_patterns_copied">URL copied — open in browser on host</string>
+    <string name="testufo_blackframes">testufo blackframes</string>
+    <string name="testufo_eyetracking">testufo eyetracking</string>
+    <string name="testufo_photo">testufo photo</string>
+    <string name="testufo_starfield">testufo starfield</string>
+
+    <!-- Test UX: BFI toggle + stall warning (Commit 5) -->
+    <string name="game_menu_toggle_bfi">Toggle BFI</string>
+    <string name="bfi_toggle_title">Switching BFI mode…</string>
+    <string name="bfi_toggle_msg">Please wait while the renderer restarts.</string>
+    <string name="bfi_stall_warning">Stream stalling — BFI may show black frames</string>
 </resources>

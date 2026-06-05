@@ -187,6 +187,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private int displayWidth;
     private int displayHeight;
     private int currentOrientation;
+    // Display refresh rate captured at stream start, reused by the live
+    // BFI toggle so it can build a fresh BfiOnlyRenderer / PostProcess
+    // renderer without re-running prepareDisplayForRendering().
+    private float currentDisplayRefreshRate;
 
     public NvConnection conn;
     private SpinnerDialog spinner;
@@ -240,6 +244,25 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private PostProcessVideoRenderer postProcessRenderer;
 
     private boolean reportedCrash;
+
+    // BFI toggle state machine. Cycles through the three render modes on
+    // each press. The enum lives here (not in BfiScheduler) because the
+    // post-process / BFI-only / SDR choice is a Game-level concern.
+    private BfiMode currentBfiMode = BfiMode.SDR;
+    private boolean lastStallWarningShown = false;
+
+    private enum BfiMode {
+        SDR, BFI_ONLY, POST_PROCESS;
+
+        public BfiMode next() {
+            switch (this) {
+                case SDR:          return BFI_ONLY;
+                case BFI_ONLY:     return POST_PROCESS;
+                case POST_PROCESS: return SDR;
+                default:           return SDR;
+            }
+        }
+    }
 
     // A/B frame capture state (test-UX). Bitmaps are owned by this Activity
     // and recycled in onDestroy/onStop. The capture readback downsamples to
@@ -775,6 +798,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Set to the optimal mode for streaming
         float displayRefreshRate = prepareDisplayForRendering(currentDisplay);
+        currentDisplayRefreshRate = displayRefreshRate;
         LimeLog.info("Display refresh rate: "+displayRefreshRate);
 
         // If the user requested frame pacing using a capped FPS, we will need to change our
@@ -4222,6 +4246,118 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(rgba);
         bmp.copyPixelsFromBuffer(buf);
         return bmp;
+    }
+
+    /**
+     * Cycle the active BFI render mode: SDR -> BfiOnlyRenderer ->
+     * PostProcessVideoRenderer -> SDR. The whole sequence runs on the UI
+     * thread (the existing startBlocking()/stop() contracts block for up
+     * to 2s each) and is wrapped in a {@link SpinnerDialog} so the user
+     * has feedback. After the cycle, a stall warning toast fires if the
+     * new renderer reports isFrameStalled() == true.
+     */
+    public void cycleBfiMode() {
+        // Wrapped in try/finally so the spinner always closes, even if a
+        // renderer init throws. See discovery-bfi-toggle-blocks.
+        SpinnerDialog.displayDialog(this,
+                getString(R.string.bfi_toggle_title),
+                getString(R.string.bfi_toggle_msg),
+                true);
+        try {
+            stopActiveRenderer();
+            BfiMode next = currentBfiMode.next();
+            Surface renderSurface = streamContainer.getSurface();
+            switch (next) {
+                case SDR:
+                    decoderRenderer.setRenderTarget(renderSurface);
+                    break;
+                case BFI_ONLY:
+                    bfiOnlyRenderer = new BfiOnlyRenderer(
+                            this,
+                            renderSurface,
+                            prefConfig,
+                            prefConfig.fps,
+                            currentDisplayRefreshRate,
+                            getWindow(),
+                            getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY),
+                            this
+                    );
+                    if (bfiOnlyRenderer.startBlocking()) {
+                        decoderRenderer.setRenderTarget(bfiOnlyRenderer.getCodecSurface());
+                    } else {
+                        bfiOnlyRenderer.release();
+                        bfiOnlyRenderer = null;
+                        decoderRenderer.setRenderTarget(renderSurface);
+                        next = BfiMode.SDR;
+                    }
+                    break;
+                case POST_PROCESS:
+                    postProcessRenderer = new PostProcessVideoRenderer(
+                            this,
+                            renderSurface,
+                            prefConfig,
+                            prefConfig.fps,
+                            currentDisplayRefreshRate,
+                            false, // willStreamHdr re-evaluated by decide()
+                            getWindow(),
+                            getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY),
+                            this
+                    );
+                    if (postProcessRenderer.startBlocking()) {
+                        decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
+                    } else {
+                        postProcessRenderer.release();
+                        postProcessRenderer = null;
+                        decoderRenderer.setRenderTarget(renderSurface);
+                        next = BfiMode.SDR;
+                    }
+                    break;
+            }
+            currentBfiMode = next;
+            checkStallAndToast();
+        } catch (Throwable t) {
+            LimeLog.warning("BFI toggle failed: " + t);
+        } finally {
+            SpinnerDialog.closeDialogs(this);
+        }
+    }
+
+    /**
+     * Release both renderers (if any) and point the decoder back at the
+     * direct surface. Idempotent.
+     */
+    private void stopActiveRenderer() {
+        if (postProcessRenderer != null) {
+            postProcessRenderer.release();
+            postProcessRenderer = null;
+        }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.release();
+            bfiOnlyRenderer = null;
+        }
+        if (decoderRenderer != null && streamContainer != null) {
+            decoderRenderer.setRenderTarget(streamContainer.getSurface());
+        }
+    }
+
+    /**
+     * Read the active renderer's isFrameStalled() and, if true, show a
+     * one-shot toast. The flag is cleared as soon as the stream recovers
+     * so the same stall event does not re-trigger the toast.
+     */
+    private void checkStallAndToast() {
+        boolean stalled = false;
+        if (postProcessRenderer != null) {
+            stalled = postProcessRenderer.isFrameStalled();
+        } else if (bfiOnlyRenderer != null) {
+            stalled = bfiOnlyRenderer.isFrameStalled();
+        }
+        if (stalled && !lastStallWarningShown) {
+            Toast.makeText(this, R.string.bfi_stall_warning, Toast.LENGTH_LONG).show();
+            lastStallWarningShown = true;
+        } else if (!stalled) {
+            lastStallWarningShown = false;
+        }
     }
 
     @Override
