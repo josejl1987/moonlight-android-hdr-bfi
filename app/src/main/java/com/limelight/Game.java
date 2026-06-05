@@ -249,6 +249,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private BfiOnlyRenderer bfiOnlyRenderer;
     private boolean reportedCrash;
 
+    /**
+     * True when either the libretro post-process renderer or the BFI-only
+     * fast path is active. Used to gate the in-game overlay and the
+     * "Renderer: active" diagnostic text — both must reflect whichever
+     * renderer is in use.
+     */
+    private boolean isAnyRendererActive() {
+        return postProcessRenderer != null || bfiOnlyRenderer != null;
+    }
+
     private WifiManager.WifiLock highPerfWifiLock;
     private WifiManager.WifiLock lowLatencyWifiLock;
 
@@ -1399,7 +1409,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 }
 
                 notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
-                if (postProcessRenderer != null && postProcessOverlayView != null) {
+                if (isAnyRendererActive() && postProcessOverlayView != null) {
                     postProcessOverlayView.setVisibility(View.VISIBLE);
                 }
 
@@ -4136,7 +4146,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Diagnostic status
         TextView status = new TextView(this);
-        status.setText(postProcessRenderer != null
+        status.setText(isAnyRendererActive()
                 ? "Renderer: active \u2014 brightness/BFI apply live; HDR mode changes need reconnect"
                 : "Renderer: inactive \u2014 settings apply on next stream start");
         status.setPadding(0, 0, 0, pad);
