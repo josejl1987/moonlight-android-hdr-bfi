@@ -10,7 +10,8 @@ public final class BfiScheduler {
             return false;
         }
 
-        float requiredHz = streamFps * (1 + Math.max(1, darkFrames));
+        int clampedDarkFrames = Math.max(1, darkFrames);
+        float requiredHz = streamFps * (1f + clampedDarkFrames);
         return Math.abs(displayHz - requiredHz) <= 3f;
     }
 

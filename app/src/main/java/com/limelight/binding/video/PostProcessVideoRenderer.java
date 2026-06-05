@@ -63,7 +63,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     private final BfiScheduler bfiScheduler = new BfiScheduler();
     private final LibretroHdrUniforms hdrUniforms = new LibretroHdrUniforms();
-    private final ArtemisPostProcessExtensions artemis = new ArtemisPostProcessExtensions();
+
     private volatile Decision lastDecision;
     private boolean lastHdrModeActive;
     private Choreographer choreographer;
@@ -348,7 +348,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         refreshResolvedSettings(false);
 
         updateHdrModeForCurrentSurface();
-        boolean androidEglFallback = isAndroidEglFallback();
 
         // Initialize size uniforms. SourceSize is the decoded video frame;
         // OutputSize is the actual EGL window surface (which may differ after
@@ -361,13 +360,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         int outH = eglContext.getSurfaceHeight();
         hdrUniforms.outputWidth = outW > 0 ? outW : prefConfig.width;
         hdrUniforms.outputHeight = outH > 0 ? outH : prefConfig.height;
-
-        // Record whether the actual EGL surface differs from the requested
-        // libretro mode. This is an Artemis extension — the libretro layer
-        // doesn't track fallback, but the log/diagnostics need to.
-        artemis.androidEglFallback = androidEglFallback;
-        // Re-derive the visible BrightnessNits for logs/UI only.
-        artemis.visibleBrightnessNits = hdrUniforms.brightnessNits;
 
         notifyHdrModeChanged();
 
@@ -531,10 +523,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
             GLES20.glUseProgram(program);
 
-            // Upload the raw libretro value; the Artemis extension layer only
-            // affects logs/status.
-            float baseBrightnessNits = hdrUniforms.brightnessNits;
-
             GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
             GLES20.glUniform1i(uTextureLoc, 0);
@@ -554,7 +542,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                         1.0f / Math.max(hdrUniforms.outputWidth, 1.0f),
                         1.0f / Math.max(hdrUniforms.outputHeight, 1.0f));
             }
-            if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, baseBrightnessNits);
+            if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
             if (uSubpixelLayoutLoc >= 0) GLES20.glUniform1i(uSubpixelLayoutLoc, hdrUniforms.subpixelLayout);
             if (uScanlinesLoc >= 0) GLES20.glUniform1f(uScanlinesLoc, hdrUniforms.scanlines);
             if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
@@ -734,14 +722,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 && bfiScheduler.canEnable(streamFps, displayRefreshRate, darkFrames);
         bfiScheduler.configure(bfiActive, darkFrames);
 
-        // Artemis extensions: populate the extension struct with the
-        // non-libretro knobs. The libretro value in hdrUniforms.brightnessNits
-        // stays untouched.
-        artemis.forcePostProcess = prefConfig.postProcessRendererMode;
-        // androidEglFallback is updated only from the created EGL surface so
-        // a settings refresh does not erase a real fallback state.
-        artemis.visibleBrightnessNits = hdrUniforms.brightnessNits;
-
         String reconnectMessage = null;
         if (logChanges && eglContext != null && postProcessCapabilities != null) {
             String desiredTargetMode = determineTargetMode(postProcessCapabilities);
@@ -769,9 +749,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                     + " subpixel=" + hdrUniforms.subpixelLayout
                     + " bfi=" + bfiScheduler.isEnabled()
                     + " darkFrames=" + bfiScheduler.getDarkFrames());
-            LimeLog.info("Artemis extension: visible BrightnessNits=" + (int) artemis.visibleBrightnessNits
-                    + ", forcePostProcess=" + forcePostProcessName(artemis.forcePostProcess)
-                    + ", androidEglFallback=" + artemis.androidEglFallback);
         }
 
         lastDecision = decide(prefConfig, displayRefreshRate, hostHdrStreamActive);
@@ -784,14 +761,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
 
-
-    private static String forcePostProcessName(int mode) {
-        switch (mode) {
-            case PreferenceConfiguration.POST_PROCESS_AUTO: return "Auto";
-            case PreferenceConfiguration.POST_PROCESS_FORCE: return "Force";
-            default: return "Off";
-        }
-    }
 
     private static int clampGamut(int v) {
         if (v < LibretroHdrUniforms.GAMUT_ACCURATE) return LibretroHdrUniforms.GAMUT_ACCURATE;

@@ -1,6 +1,6 @@
 package com.limelight.binding.video;
 
-/** libretro HDR uniform struct; mirrors the UBO in res/raw/libretro_hdr_common.glsl. */
+/** Resolved libretro HDR state uploaded to the GLSL shaders. */
 public final class LibretroHdrUniforms {
     public static final int HDR_MODE_OFF         = 0;
     public static final int HDR_MODE_HDR10       = 1;
