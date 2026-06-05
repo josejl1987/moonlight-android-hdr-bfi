@@ -66,13 +66,13 @@ The main repo had stayed silent for 5 months, with nobody actually responding to
 ## Downloads
 * [Download APK directly](https://github.com/ClassicOldSong/moonlight-android/releases)
 * [Use Obtainium](https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22com.limelight.noir%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2FClassicOldSong%2Fmoonlight-android%22%2C%22author%22%3A%22ClassicOldSong%22%2C%22name%22%3A%22Artemis%22%2C%22additionalSettings%22%3A%22%7B%5C%22apkFilterRegEx%5C%22%3A%5C%22nonRoot%5C%22%2C%5C%22matchGroutToUse%5C%22%3A%5C%22%241%5C%22%2C%5C%22versionExtractionRegEx%5C%22%3A%5C%22v(.%2B)%5C%22%7D%22%7D) (recommended)
+* Install updated builds with `adb install -r <apk>` so app data stays in place; uninstalling the package clears the saved unique ID and paired server certificate, which forces re-pairing
 
 ## Building
 * Install Android Studio and the Android NDK
 * Run ‘git submodule update --init --recursive’ from within moonlight-android/
 * In moonlight-android/, create a file called ‘local.properties’. Add an ‘ndk.dir=’ property to the local.properties file and set it equal to your NDK directory.
 * Build the APK using Android Studio or gradle
-* Install updated builds with `adb install -r <apk>` so app data stays in place; uninstalling the package clears the saved unique ID and paired server certificate, which forces re-pairing
 
 ## Authors
 
