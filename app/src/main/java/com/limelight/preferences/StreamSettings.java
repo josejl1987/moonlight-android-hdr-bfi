@@ -77,7 +77,6 @@ public class StreamSettings extends AppCompatActivity {
     static DisplayCutout displayCutoutP;
 
     void reloadSettings() {
-        Log.i("StreamSettings", "reloadSettings() activity-level");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Display.Mode mode = getActiveDisplay(StreamSettings.this, previousPrefs).getMode();
             previousDisplayPixelCount = mode.getPhysicalWidth() * mode.getPhysicalHeight();
@@ -93,9 +92,7 @@ public class StreamSettings extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-//        setTheme(R.style.AppTheme);
         super.onCreate(savedInstanceState);
-        Log.i("StreamSettings", "onCreate()");
 
         previousPrefs = PreferenceConfiguration.readPreferences(this);
 
@@ -109,7 +106,6 @@ public class StreamSettings extends AppCompatActivity {
     @Override
     public void onAttachedToWindow() {
         super.onAttachedToWindow();
-        Log.i("StreamSettings", "onAttachedToWindow()");
 
         // We have to use this hack on Android 9 because we don't have Display.getCutout()
         // which was added in Android 10.
@@ -128,7 +124,6 @@ public class StreamSettings extends AppCompatActivity {
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        Log.i("StreamSettings", "onConfigurationChanged()");
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Display.Mode mode = getActiveDisplay(StreamSettings.this, previousPrefs).getMode();
@@ -175,7 +170,6 @@ public class StreamSettings extends AppCompatActivity {
     @Override
     // NOTE: This will NOT be called on Android 13+ with android:enableOnBackInvokedCallback="true"
     public void onBackPressed() {
-        Log.i("StreamSettings", "onBackPressed()");
         finish();
 
         // Language changes are handled via configuration changes in Android 13+,
@@ -199,18 +193,15 @@ public class StreamSettings extends AppCompatActivity {
     @Override
     protected void onPause() {
         super.onPause();
-        Log.i("StreamSettings", "onPause()");
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        Log.i("StreamSettings", "onStop()");
     }
 
     @Override
     protected void onDestroy() {
-        Log.i("StreamSettings", "onDestroy()");
         super.onDestroy();
     }
 

@@ -67,7 +67,6 @@ import android.content.ClipDescription;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
@@ -111,11 +110,9 @@ import android.widget.FrameLayout;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
-import android.widget.CompoundButton;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
-import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.ImageButton;
@@ -948,8 +945,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                                 prefConfig,
                                 prefConfig.fps,
                                 displayRefreshRate,
-                                getWindow(),
-                                finalCurrentDisplay,
                                 Game.this
                         );
                         if (bfiOnlyRenderer != null && bfiOnlyRenderer.startBlocking()) {
@@ -1865,14 +1860,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             unbindService(usbDriverServiceConnection);
         }
 
-        if (postProcessRenderer != null) {
-            postProcessRenderer.release();
-            postProcessRenderer = null;
-        }
-        if (bfiOnlyRenderer != null) {
-            bfiOnlyRenderer.release();
-            bfiOnlyRenderer = null;
-        }
+        releasePostProcessRenderers();
         if (postProcessOverlayView != null) {
             postProcessOverlayView.setVisibility(View.GONE);
             postProcessOverlayView.setText("");
@@ -1916,14 +1904,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             keyBoardLayoutController.hide();
         }
 
-        if (postProcessRenderer != null) {
-            postProcessRenderer.release();
-            postProcessRenderer = null;
-        }
-        if (bfiOnlyRenderer != null) {
-            bfiOnlyRenderer.release();
-            bfiOnlyRenderer = null;
-        }
+        releasePostProcessRenderers();
         showPostProcessOverlay(false);
 
         if (conn != null) {
@@ -4254,10 +4235,24 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (postProcessRenderer != null) {
             postProcessRenderer.updateSettings();
             showPostProcessOverlay(true);
+        } else if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.updateSettings();
+            showPostProcessOverlay(true);
         } else {
             Toast.makeText(this,
                     "Saved. Restart stream or set renderer to Force before connecting.",
                     Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void releasePostProcessRenderers() {
+        if (postProcessRenderer != null) {
+            postProcessRenderer.release();
+            postProcessRenderer = null;
+        }
+        if (bfiOnlyRenderer != null) {
+            bfiOnlyRenderer.release();
+            bfiOnlyRenderer = null;
         }
     }
 

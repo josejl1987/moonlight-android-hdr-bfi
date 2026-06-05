@@ -6,9 +6,7 @@ import android.opengl.GLES20;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.view.Choreographer;
-import android.view.Display;
 import android.view.Surface;
-import android.view.Window;
 
 import com.limelight.LimeLog;
 import com.limelight.preferences.PreferenceConfiguration;
@@ -22,35 +20,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Slim BFI-only renderer for the host-HDR + BFI fast path.
- *
- * <p>Mirrors {@link PostProcessVideoRenderer}'s lifecycle (init GL on caller
- * thread, {@link #startBlocking()} for the render thread) but strips out the
- * SDR adapter FBO, the 2D RGBA8 intermediate texture, the libretro composite
- * program, and the tonemap pipeline. It owns exactly:</p>
- * <ul>
- *   <li>one EGL context (delegated to {@link EglPostProcessContext} with
- *       {@code requestMode="HDR10"} so the system compositor presents the
- *       surface as BT.2020 PQ);</li>
- *   <li>one OES adapter program (the existing
- *       {@code oes_adapter_vert/frag} shaders);</li>
- *   <li>one {@code GL_TEXTURE_EXTERNAL_OES} bound to a {@link SurfaceTexture}
- *       whose {@link Surface} is exposed to the decoder;</li>
- *   <li>one {@link BfiScheduler} instance for the cadence.</li>
- * </ul>
- *
- * <p>On a "show" refresh the renderer binds the OES adapter program and draws
- * a fullscreen quad sampling the OES texture with the OES transform matrix.
- * On a "black" refresh it issues a single {@code glClear} (zero RGB → PQ(0) =
- * 0 cd/m², true black via the panel EOTF on a BT.2020 PQ surface).</p>
- *
- * <p>Failure modes:</p>
- * <ul>
- *   <li>EGL init failure or EGL HDR10 silent fallback to SDR →
- *       {@link #startBlocking()} returns {@code false}; the caller is expected
- *       to fall back to the direct surface path.</li>
- *   <li>Shader compile/link failure, OES texture init failure → same.</li>
- * </ul>
+ * BFI-only renderer for host-HDR streams. The decoder writes to an OES
+ * SurfaceTexture; this renderer alternates visible OES frames with black
+ * frames on an HDR10 EGL surface.
  */
 public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableListener {
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
@@ -59,18 +31,12 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     // PostProcessVideoRenderer.java:598-600 (~every 60 frames ≈ 0.5s at
     // 120Hz).
     private static final int STATUS_PUBLISH_INTERVAL_FRAMES = 60;
-    // Stall threshold for the public isFrameStalled() hook used by the BFI
-    // toggle toast. 2 vsync intervals ≈ 16.6 ms at 120 Hz. Mirrors
-    // PostProcessVideoRenderer.STALL_HOOK_TIMEOUT_NS.
-    private static final long STALL_HOOK_TIMEOUT_NS = 2L * 16_666_667L;
 
     private final Context context;
     private final Surface outputSurface;
     private final PreferenceConfiguration prefConfig;
     private final float streamFps;
     private final float displayRefreshRate;
-    private final Window window;
-    private final Display display;
     private final PostProcessStatusListener statusListener;
 
     private EglPostProcessContext eglContext;
@@ -122,8 +88,6 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
             PreferenceConfiguration prefs,
             float streamFps,
             float displayRefreshRate,
-            Window window,
-            Display display,
             PostProcessStatusListener statusListener
     ) {
         this.context = context;
@@ -131,23 +95,11 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
         this.prefConfig = prefs;
         this.streamFps = streamFps;
         this.displayRefreshRate = displayRefreshRate;
-        this.window = window;
-        this.display = display;
         this.statusListener = statusListener;
     }
 
     public Surface getCodecSurface() {
         return codecSurface;
-    }
-
-    /**
-     * Returns {@code true} when no new decoder frame has arrived for at
-     * least two vsync intervals, as tracked by the embedded
-     * {@link BfiScheduler}. Safe to call from any thread (backed by a
-     * volatile read).
-     */
-    public boolean isFrameStalled() {
-        return bfiScheduler.isFrameStalled();
     }
 
     public boolean startBlocking() {
@@ -230,10 +182,6 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
         if (released) return;
         released = true;
         stop();
-    }
-
-    public boolean isBfiActive() {
-        return running && !recoveryFailed;
     }
 
     public String getDebugStatus() {
@@ -434,10 +382,6 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
         }
 
         long nowNs = System.nanoTime();
-        // Drive the public isFrameStalled() hook on every vsync so the
-        // value reflects the latest gap, even when no new frame arrived.
-        bfiScheduler.evaluateStall(nowNs, STALL_HOOK_TIMEOUT_NS);
-
         boolean isBlack = bfiScheduler.nextIsBlack();
 
         if (isBlack) {
@@ -459,7 +403,6 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
                 return;
             }
             frameAvailable = false;
-            bfiScheduler.recordFrameArrival(nowNs);
 
             // Always clear to black first so any partial draw is bounded by
             // PQ(0). The OES adapter program overwrites the entire viewport

@@ -1,23 +1,6 @@
 package com.limelight.binding.video;
 
-/**
- * libretro HDR uniform struct — the resolved state uploaded to the GLSL
- * composite and tonemap shaders. Mirrors the UBO defined in
- * {@code res/raw/libretro_hdr_common.glsl}, which is a port of RetroArch's
- * {@code gfx/drivers/vulkan_shaders/hdr_common.glsl}.
- *
- * <p>Field names match the libretro spec exactly so call sites stay readable;
- * the renderer is responsible for mapping them onto the matching GLSL
- * uniforms. Defaults follow RetroArch's own defaults as documented in
- * {@code config.def.h} for {@code video_hdr_mode},
- * {@code video_hdr_paper_white_nits}, and {@code video_hdr_expand_gamut}.</p>
- *
- * <p>This struct holds <em>libretro state only</em>. Artemis-specific
- * post-process extensions (BFI brightness compensation, force post-process
- * enable, EGL fallback tracking) live in
- * {@link ArtemisPostProcessExtensions} so the libretro math stays
- * untouched.</p>
- */
+/** libretro HDR uniform struct; mirrors the UBO in res/raw/libretro_hdr_common.glsl. */
 public final class LibretroHdrUniforms {
     public static final int HDR_MODE_OFF         = 0;
     public static final int HDR_MODE_HDR10       = 1;

@@ -27,11 +27,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
     private static final int STATS_INTERVAL_FRAMES = 300;
     private static final long FRAME_STALL_TIMEOUT_NS = 3_000_000_000L;
-    // Stall threshold for the public isFrameStalled() hook used by the BFI
-    // toggle toast. 2 vsync intervals ≈ 16.6 ms at 120 Hz. Kept separate
-    // from FRAME_STALL_TIMEOUT_NS so the public hook can be tuned without
-    // affecting the existing internal "clear texture" logic.
-    private static final long STALL_HOOK_TIMEOUT_NS = 2L * 16_666_667L;
     private static final long INIT_TIMEOUT_MS = 2000;
 
     private final Context context;
@@ -170,16 +165,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     public Decision getLastDecision() {
         return lastDecision;
-    }
-
-    /**
-     * Returns {@code true} when no new decoder frame has arrived for at
-     * least two vsync intervals, as tracked by the embedded
-     * {@link BfiScheduler}. Safe to call from any thread (backed by a
-     * volatile read).
-     */
-    public boolean isFrameStalled() {
-        return bfiScheduler.isFrameStalled();
     }
 
     public boolean startBlocking() {
@@ -509,10 +494,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         boolean frameStalled = hasValidTextureFrame
                 && (nowNs - lastSuccessfulUpdateTexImageNs) > FRAME_STALL_TIMEOUT_NS;
 
-        // Drive the public isFrameStalled() hook on every vsync so the
-        // value reflects the latest gap, even when no new frame arrived.
-        bfiScheduler.evaluateStall(nowNs, STALL_HOOK_TIMEOUT_NS);
-
         if (frameStalled) {
             LimeLog.warning("PostProcess: frame stall detected, clearing texture");
             hasValidTextureFrame = false;
@@ -531,7 +512,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             hasValidTextureFrame = true;
             lastSuccessfulUpdateTexImageNs = nowNs;
             lastFrameDrawStartNs = nowNs;
-            bfiScheduler.recordFrameArrival(nowNs);
             consumedNewFrame = true;
             int[] viewport = new int[4];
             GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, viewport, 0);
