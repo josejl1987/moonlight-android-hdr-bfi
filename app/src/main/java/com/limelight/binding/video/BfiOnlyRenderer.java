@@ -56,6 +56,10 @@ import java.util.concurrent.TimeUnit;
 public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableListener {
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
     private static final long INIT_TIMEOUT_MS = 2000;
+    // Throttle status publishing to avoid spamming the UI thread. Mirrors
+    // PostProcessVideoRenderer.java:598-600 (~every 60 frames ≈ 0.5s at
+    // 120Hz).
+    private static final int STATUS_PUBLISH_INTERVAL_FRAMES = 60;
 
     private final Context context;
     private final Surface outputSurface;
@@ -65,6 +69,11 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     private final Window window;
     private final Display display;
     private final StreamView streamView;
+    // The StreamView parameter is a typed name for the Game activity
+    // (which implements PostProcessStatusListener at the time of writing).
+    // We cast to the listener interface once and use that field for status
+    // pushes — StreamView itself has no onPostProcessStatusUpdate method.
+    private final PostProcessStatusListener statusListener;
 
     private EglPostProcessContext eglContext;
     private SurfaceTexture surfaceTexture;
@@ -85,6 +94,7 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     private volatile boolean recoveryFailed;
     private volatile boolean surfaceTextureReady;
     private volatile boolean frameAvailable;
+    private volatile boolean released;
     private int statsFrameCount;
 
     private HandlerThread renderThread;
@@ -126,6 +136,12 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
         this.window = window;
         this.display = display;
         this.streamView = streamView;
+        // Cast once. If a future refactor passes a StreamView that does not
+        // implement PostProcessStatusListener, the renderer silently never
+        // publishes status (listener == null) rather than crashing.
+        this.statusListener = (streamView instanceof PostProcessStatusListener)
+                ? (PostProcessStatusListener) streamView
+                : null;
     }
 
     public Surface getCodecSurface() {
@@ -206,6 +222,11 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     }
 
     public void release() {
+        // Idempotent: a second release() call is a no-op. This matters for
+        // the Game.java release path (onStop + onDestroy) which can fire
+        // twice in a row if the activity is re-bound.
+        if (released) return;
+        released = true;
         stop();
     }
 
@@ -216,6 +237,15 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
     public String getDebugStatus() {
         return "BFI=" + bfiScheduler.getDarkFrames()
                 + ", cycle=" + (1 + bfiScheduler.getDarkFrames());
+    }
+
+    private void publishStatus() {
+        if (statusListener == null) return;
+        // The render thread is the caller for in-loop publishes; the
+        // PostProcessStatusListener implementations in this codebase marshal
+        // to the UI thread themselves (see Game#onPostProcessStatusUpdate),
+        // so a direct call is safe.
+        statusListener.onPostProcessStatusUpdate(getDebugStatus());
     }
 
     @Override
@@ -323,6 +353,8 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
                 + " oesProgram=" + oesProgram + " oesTexture=" + oesTextureId
                 + " bfi=" + bfiActive + " darkFrames=" + darkFrames);
 
+        publishStatus();
+
         if (initLatch != null) initLatch.countDown();
 
         // Kick off the Choreographer-driven render loop on this render thread.
@@ -355,7 +387,10 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
         }
         surfaceTextureReady = false;
         recoveryFailed = false;
+        statsFrameCount = 0;
         LimeLog.info("BfiOnly: GL released");
+        // Publish "BFI=off" so the overlay reflects the inactive state.
+        publishStatus();
     }
 
     private void onVsyncFrame(long frameTimeNanos) {
@@ -430,8 +465,19 @@ public final class BfiOnlyRenderer implements SurfaceTexture.OnFrameAvailableLis
             eglContext.swapBuffers();
         }
 
-        // Status publishing will be added in WU-3; keep a frame counter for it.
+        // Surface any GL errors from this frame. We check after swapBuffers
+        // so the loop self-recovers via recoveryFailed on the next vsync if
+        // the EGL context was lost (e.g. backgrounded activity).
+        int glError = GLES20.glGetError();
+        if (glError != GLES20.GL_NO_ERROR) {
+            LimeLog.warning("BfiOnly: glGetError after frame: 0x" + Integer.toHexString(glError));
+            recoveryFailed = true;
+        }
+
         statsFrameCount++;
+        if (statsFrameCount == 1 || statsFrameCount % STATUS_PUBLISH_INTERVAL_FRAMES == 0) {
+            publishStatus();
+        }
 
         if (running && !recoveryFailed && choreographer != null) {
             choreographer.postFrameCallback(renderFrameCallback);
