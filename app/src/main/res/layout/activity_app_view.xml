@@ -44,4 +44,18 @@
         android:layout_margin="16dp"
         app:icon="@drawable/ic_profiles" />
 
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/testPatternsButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:layout_alignParentStart="true"
+        android:layout_alignParentLeft="true"
+        android:layout_marginBottom="24dp"
+        android:layout_marginStart="24dp"
+        android:layout_marginLeft="24dp"
+        android:contentDescription="@string/test_patterns_local_title"
+        android:src="@android:drawable/ic_menu_view"
+        app:tint="#FFFFFFFF" />
+
 </RelativeLayout>

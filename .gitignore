@@ -47,3 +47,6 @@ app/.externalNativeBuild/
 
 # agent files
 AGENTS.md
+# debug screenshots
+test_pattern_*.png
+border_*.png

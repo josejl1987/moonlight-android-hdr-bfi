@@ -773,6 +773,8 @@
     <string name="paper_white_title">Paper white calibration</string>
     <string name="paper_white_done">Done</string>
     <string name="paper_white_reset">Reset to 200</string>
+    <string name="test_patterns_local_title">Local test patterns</string>
+    <string name="test_patterns_local_menu">Local test patterns (shader)</string>
 
     <!-- Test UX: test patterns submenu (Commit 5) -->
     <string name="game_menu_test_patterns">Test patterns</string>

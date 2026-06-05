@@ -244,6 +244,20 @@
             android:exported="false"
             android:theme="@style/AppTheme" />
 
+        <!-- Test UX: local synthetic patterns fed through the libretro
+             HDR shader. No host, no browser, no stream — the user can
+             exercise the post-process pipeline offline. Exported because
+             it has no sensitive data and we want to launch it from adb
+             (and any other app) for in-field testing.
+             colorMode=wideColorGamut matches Game.java — without it the
+             EGL surface is 8-bit SDR and the HDR output is clamped
+             before reaching the display. -->
+        <activity
+            android:name=".LocalTestPatternActivity"
+            android:exported="true"
+            android:label="@string/test_patterns_local_title"
+            android:colorMode="wideColorGamut"
+            android:theme="@style/AppTheme" />
 
         <activity android:name=".DebugInfoActivity"
             android:launchMode="singleTask"/>
