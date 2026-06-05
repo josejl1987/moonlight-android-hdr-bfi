@@ -249,16 +249,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private BfiOnlyRenderer bfiOnlyRenderer;
     private boolean reportedCrash;
 
-    /**
-     * True when either the libretro post-process renderer or the BFI-only
-     * fast path is active. Used to gate the in-game overlay and the
-     * "Renderer: active" diagnostic text — both must reflect whichever
-     * renderer is in use.
-     */
-    private boolean isAnyRendererActive() {
-        return postProcessRenderer != null || bfiOnlyRenderer != null;
-    }
-
     private WifiManager.WifiLock highPerfWifiLock;
     private WifiManager.WifiLock lowLatencyWifiLock;
 
@@ -1409,7 +1399,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 }
 
                 notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
-                if (isAnyRendererActive() && postProcessOverlayView != null) {
+                if (postProcessRenderer != null && postProcessOverlayView != null) {
                     postProcessOverlayView.setVisibility(View.VISIBLE);
                 }
 
@@ -4146,7 +4136,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Diagnostic status
         TextView status = new TextView(this);
-        status.setText(isAnyRendererActive()
+        status.setText(postProcessRenderer != null
                 ? "Renderer: active \u2014 brightness/BFI apply live; HDR mode changes need reconnect"
                 : "Renderer: inactive \u2014 settings apply on next stream start");
         status.setPadding(0, 0, 0, pad);
@@ -4167,11 +4157,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 prefConfig.videoHdrMode);
 
         // Brightness
-        final Spinner brightnessSpinner = createSpinner(root,
-                getString(R.string.title_video_hdr_paper_white),
-                R.array.brightness_nits_names,
-                R.array.brightness_nits_values,
-                prefConfig.videoHdrPaperWhiteNits);
+        TextView brightnessLabel = new TextView(this);
+        brightnessLabel.setText(getString(R.string.title_video_hdr_paper_white));
+        brightnessLabel.setPadding(0, 0, 0, 8);
+        root.addView(brightnessLabel);
+        final android.widget.EditText brightnessEdit = new android.widget.EditText(this);
+        brightnessEdit.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+        brightnessEdit.setText(Integer.toString(prefConfig.videoHdrPaperWhiteNits));
+        root.addView(brightnessEdit);
 
         // BFI
         final CheckBox bfiCheck = new CheckBox(this);
@@ -4186,23 +4179,19 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 R.array.video_bfi_dark_frames_values,
                 prefConfig.videoBfiDarkFrames);
 
-        // BFI compensation
-        final Spinner compSpinner = createSpinner(root,
-                getString(R.string.title_video_bfi_compensation),
-                R.array.video_bfi_compensation_names,
-                R.array.video_bfi_compensation_values,
-                prefConfig.videoBfiCompensationMode);
-
         new AlertDialog.Builder(this)
                 .setTitle(R.string.game_menu_postprocess_quick_setup)
                 .setView(scrollView)
                 .setPositiveButton("Apply", (dialog, which) -> {
                     prefConfig.postProcessRendererMode = spinnerValue(rendererSpinner);
                     prefConfig.videoHdrMode = spinnerValue(hdrModeSpinner);
-                    prefConfig.videoHdrPaperWhiteNits = spinnerValue(brightnessSpinner);
+                    try {
+                        prefConfig.videoHdrPaperWhiteNits = Integer.parseInt(brightnessEdit.getText().toString().trim());
+                    } catch (NumberFormatException e) {
+                        prefConfig.videoHdrPaperWhiteNits = 200;
+                    }
                     prefConfig.videoBlackFrameInsertion = bfiCheck.isChecked();
                     prefConfig.videoBfiDarkFrames = spinnerValue(darkFrameSpinner);
-                    prefConfig.videoBfiCompensationMode = spinnerValue(compSpinner);
                     persistAndApplyPostProcessSettings();
                 })
                 .setNeutralButton("Cancel", null)

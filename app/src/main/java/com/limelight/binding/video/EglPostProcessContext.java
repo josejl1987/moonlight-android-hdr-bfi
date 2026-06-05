@@ -154,6 +154,74 @@ public final class EglPostProcessContext {
     }
 
     /**
+     * One-shot, cached probe for the device's BT.2020 PQ EGL surface
+     * support. Used by {@code StreamSettings} to enable the BFI checkbox
+     * in the host-HDR + no-renderer case (the BFI fast path requires a
+     * PQ EGL surface).
+     *
+     * <p>The probe opens a temporary EGL display, queries the extension
+     * string, then terminates the display. The result is cached in a
+     * static {@code AtomicReference} for the rest of the process
+     * lifetime (a few ms on first call, O(1) thereafter). The
+     * {@code context} parameter is currently unused but is accepted for
+     * API symmetry with the rest of the project.</p>
+     *
+     * @return {@code true} if the device exposes
+     *         {@code EGL_EXT_gl_colorspace_bt2020_pq}; {@code false} on
+     *         any probe failure, missing extension, or platform that
+     *         does not return a usable EGL display.
+     */
+    public static boolean deviceSupportsHdr10Egl(android.content.Context context) {
+        Boolean cached = sHdr10EglProbeResult.get();
+        if (cached != null) {
+            return cached;
+        }
+        synchronized (sHdr10EglProbeLock) {
+            cached = sHdr10EglProbeResult.get();
+            if (cached != null) {
+                return cached;
+            }
+            boolean result = probeHdr10EglSupport();
+            sHdr10EglProbeResult.set(result);
+            return result;
+        }
+    }
+
+    private static boolean probeHdr10EglSupport() {
+        android.opengl.EGLDisplay display = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
+        if (display == EGL14.EGL_NO_DISPLAY) {
+            return false;
+        }
+        int[] version = new int[2];
+        if (!EGL14.eglInitialize(display, version, 0, version, 1)) {
+            return false;
+        }
+        try {
+            String ext = EGL14.eglQueryString(display, 0x3055);
+            if (ext == null) {
+                return false;
+            }
+            return ext.contains("EGL_EXT_gl_colorspace_bt2020_pq");
+        } catch (Throwable t) {
+            LimeLog.warning("BfiOnly: EGL HDR10 probe failed: " + t.getMessage());
+            return false;
+        } finally {
+            try {
+                EGL14.eglTerminate(display);
+            } catch (Throwable t) {
+                // EGL display may already be terminated; safe to ignore.
+            }
+        }
+    }
+
+    // Process-wide cache for the HDR10 EGL probe. AtomicReference (not
+    // AtomicBoolean) so we can distinguish "not probed yet" (null) from
+    // "probed, returned false" (Boolean.FALSE).
+    private static final java.util.concurrent.atomic.AtomicReference<Boolean> sHdr10EglProbeResult =
+            new java.util.concurrent.atomic.AtomicReference<>(null);
+    private static final Object sHdr10EglProbeLock = new Object();
+
+    /**
      * Returns the current EGL window surface width, or 0 if the surface is
      * not yet created or the query fails. The width reflects the actual
      * surface dimensions at the time of the call, including any

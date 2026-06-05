@@ -744,10 +744,7 @@
     <string name="video_hdr_scrgb">scRGB (FP16)</string>
     <string name="title_video_hdr_paper_white">HDR paper white</string>
     <string name="summary_video_hdr_paper_white">Paper white in nits for the HDR shader. RetroArch default is 200 nits.</string>
-    <string name="paper_white_150">150 nits</string>
-    <string name="paper_white_200">200 nits</string>
-    <string name="paper_white_250">250 nits</string>
-    <string name="paper_white_300">300 nits</string>
+    <!-- Brightness nits strings removed; free-form text input is now used instead of a spinner. -->
     <string name="title_video_hdr_expand_gamut">Gamut expansion</string>
     <string name="summary_video_hdr_expand_gamut">Expand gamut when post-processing HDR</string>
     <string name="video_hdr_gamut_accurate">Accurate</string>
@@ -765,10 +762,6 @@
     <string name="summary_video_bfi">Insert black display frames after decoding. Requires display refresh to be a clean multiple of the stream frame rate.</string>
     <string name="title_video_bfi_dark_frames">BFI dark frames</string>
     <string name="summary_video_bfi_dark_frames">Number of black refresh intervals inserted between visible frames</string>
-    <string name="title_video_bfi_compensation">BFI brightness compensation</string>
-    <string name="summary_video_bfi_compensation">Boost visible frames to compensate for BFI brightness loss.</string>
-    <string name="bfi_comp_off">Off</string>
-    <string name="bfi_comp_conservative">Conservative</string>
-    <string name="bfi_comp_full">Full</string>
+    <!-- BFI compensation strings removed; the feature was removed. -->
     <string name="game_menu_postprocess_quick_setup">Post-process quick setup</string>
 </resources>

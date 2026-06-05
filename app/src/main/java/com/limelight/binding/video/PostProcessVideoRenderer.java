@@ -11,6 +11,7 @@ import android.view.Display;
 import android.view.Surface;
 import android.view.Window;
 
+import com.limelight.BuildConfig;
 import com.limelight.LimeLog;
 import com.limelight.preferences.PreferenceConfiguration;
 
@@ -24,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 
 public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAvailableListener {
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
-    private static final int STATS_INTERVAL_FRAMES = 120;
+    private static final int STATS_INTERVAL_FRAMES = 300;
     private static final long FRAME_STALL_TIMEOUT_NS = 3_000_000_000L;
     private static final long INIT_TIMEOUT_MS = 2000;
 
@@ -69,6 +70,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private final Choreographer.FrameCallback renderFrameCallback = this::onVsyncFrame;
     private PostProcessCapabilities postProcessCapabilities;
     private String requestedEglMode = "SDR";
+    private int surfaceWidth;
+    private int surfaceHeight;
 
     private CountDownLatch initLatch;
 
@@ -364,11 +367,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // doesn't track fallback, but the log/diagnostics need to.
         artemis.androidEglFallback = androidEglFallback;
         // Re-derive the visible BrightnessNits for logs/UI only.
-        artemis.visibleBrightnessNits = computeVisibleBrightnessNits(
-                hdrUniforms.brightnessNits,
-                bfiScheduler.isEnabled(),
-                bfiScheduler.getDarkFrames(),
-                artemis.bfiBrightnessCompensation);
+        artemis.visibleBrightnessNits = hdrUniforms.brightnessNits;
 
         notifyHdrModeChanged();
 
@@ -480,7 +479,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         int surfaceW = eglContext.getSurfaceWidth();
         int surfaceH = eglContext.getSurfaceHeight();
-        if (surfaceW > 0 && surfaceH > 0) {
+        if (surfaceW > 0 && surfaceH > 0 && (surfaceW != surfaceWidth || surfaceH != surfaceHeight)) {
+            surfaceWidth = surfaceW;
+            surfaceHeight = surfaceH;
             hdrUniforms.outputWidth = surfaceW;
             hdrUniforms.outputHeight = surfaceH;
             GLES20.glViewport(0, 0, surfaceW, surfaceH);
@@ -594,7 +595,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         statsFrameCount++;
-        if (statsFrameCount == 1 || statsFrameCount % 30 == 0) {
+        if (statsFrameCount == 1 || statsFrameCount % 60 == 0) {
             publishStatus();
         }
         if (statsFrameCount >= STATS_INTERVAL_FRAMES) {
@@ -632,13 +633,17 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         float renderRateHz = (float) intervalRenderCalls * displayRefreshRate / (float) statsFrameCount;
         float actualFps = (float) intervalFramesRendered * displayRefreshRate / (float) statsFrameCount;
 
+        int renderHzTenths = Math.round(renderRateHz * 10f);
+        int fpsTenths = Math.round(actualFps * 10f);
+        int latencyHundredths = Math.round(avgLatencyMs * 100f);
+
         LimeLog.info("PostProcess: stats interval=" + statsFrameCount
                 + " render=" + intervalRenderCalls
                 + " displayed=" + intervalFramesRendered
                 + " skipped=" + intervalFramesSkipped
-                + " renderHz=" + String.format("%.1f", renderRateHz)
-                + " fps=" + String.format("%.1f", actualFps)
-                + " avgLatency=" + String.format("%.2f", avgLatencyMs) + "ms"
+                + " renderHz=" + (renderHzTenths / 10) + "." + (renderHzTenths % 10)
+                + " fps=" + (fpsTenths / 10) + "." + (fpsTenths % 10)
+                + " avgLatency=" + (latencyHundredths / 100) + "." + (latencyHundredths % 100 < 10 ? "0" : "") + (latencyHundredths % 100) + "ms"
                 + " cumulative=" + totalRenderCalls + "/" + framesRendered);
 
         intervalRenderCalls = 0;
@@ -719,7 +724,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // Host HDR streams (those that arrived over HEVC Main10 with HDR10
         // metadata) bypass the client composite entirely; the upstream frame
         // is already PQ-encoded and the EGL surface is BT.2020 PQ.
-        hdrUniforms.brightnessNits  = Math.max(80, prefConfig.videoHdrPaperWhiteNits);
+        hdrUniforms.brightnessNits  = prefConfig.videoHdrPaperWhiteNits;
         hdrUniforms.expandGamut     = clampGamut(prefConfig.videoHdrExpandGamut);
         hdrUniforms.subpixelLayout  = clampSubpixel(prefConfig.videoHdrSubpixelLayout);
         hdrUniforms.scanlines       = prefConfig.videoHdrScanlines ? 1.0f : 0.0f;
@@ -730,18 +735,12 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         bfiScheduler.configure(bfiActive, darkFrames);
 
         // Artemis extensions: populate the extension struct with the
-        // non-libretro knobs and compute the visible BrightnessNits for
-        // logging/UI only. The libretro value in hdrUniforms.brightnessNits
+        // non-libretro knobs. The libretro value in hdrUniforms.brightnessNits
         // stays untouched.
-        artemis.bfiBrightnessCompensation = prefConfig.videoBfiCompensationMode;
         artemis.forcePostProcess = prefConfig.postProcessRendererMode;
         // androidEglFallback is updated only from the created EGL surface so
         // a settings refresh does not erase a real fallback state.
-        artemis.visibleBrightnessNits = computeVisibleBrightnessNits(
-                hdrUniforms.brightnessNits,
-                bfiScheduler.isEnabled(),
-                bfiScheduler.getDarkFrames(),
-                artemis.bfiBrightnessCompensation);
+        artemis.visibleBrightnessNits = hdrUniforms.brightnessNits;
 
         String reconnectMessage = null;
         if (logChanges && eglContext != null && postProcessCapabilities != null) {
@@ -753,7 +752,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             }
         }
 
-        if (logChanges) {
+        if (logChanges && BuildConfig.DEBUG) {
             // Two lines, libretro-side and Artemis-side, so the two layers
             // are unambiguous in the log.
             String hdrModeName;
@@ -770,8 +769,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                     + " subpixel=" + hdrUniforms.subpixelLayout
                     + " bfi=" + bfiScheduler.isEnabled()
                     + " darkFrames=" + bfiScheduler.getDarkFrames());
-            LimeLog.info("Artemis extension: BFI compensation=" + bfiCompensationName(artemis.bfiBrightnessCompensation)
-                    + ", visible BrightnessNits=" + (int) artemis.visibleBrightnessNits
+            LimeLog.info("Artemis extension: visible BrightnessNits=" + (int) artemis.visibleBrightnessNits
                     + ", forcePostProcess=" + forcePostProcessName(artemis.forcePostProcess)
                     + ", androidEglFallback=" + artemis.androidEglFallback);
         }
@@ -785,31 +783,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
     }
 
-    private static float computeVisibleBrightnessNits(float libretroBrightnessNits,
-                                                      boolean bfiEnabled,
-                                                      int darkFrames,
-                                                      int compensationMode) {
-        if (!bfiEnabled || compensationMode == PreferenceConfiguration.BFI_COMP_OFF) {
-            return libretroBrightnessNits;
-        }
-        float fullScale = 1.0f + darkFrames;
-        switch (compensationMode) {
-            case PreferenceConfiguration.BFI_COMP_CONSERVATIVE:
-                return libretroBrightnessNits * Math.min(fullScale, 1.6f);
-            case PreferenceConfiguration.BFI_COMP_FULL:
-                return libretroBrightnessNits * fullScale;
-            default:
-                return libretroBrightnessNits;
-        }
-    }
 
-    private static String bfiCompensationName(int mode) {
-        switch (mode) {
-            case PreferenceConfiguration.BFI_COMP_CONSERVATIVE: return "Conservative";
-            case PreferenceConfiguration.BFI_COMP_FULL: return "Full";
-            default: return "Off";
-        }
-    }
 
     private static String forcePostProcessName(int mode) {
         switch (mode) {
