@@ -1113,15 +1113,4 @@ private static int getFramePacingValue(Context context) {
 
         return config;
     }
-
-    public static void writePostProcessPreferences(SharedPreferences.Editor editor, PreferenceConfiguration config) {
-        editor.putString(POST_PROCESS_RENDERER_PREF_STRING, Integer.toString(config.postProcessRendererMode));
-        editor.putString(VIDEO_HDR_MODE_PREF_STRING, Integer.toString(config.videoHdrMode));
-        editor.putString(VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, Integer.toString(config.videoHdrPaperWhiteNits));
-        editor.putString(VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, Integer.toString(config.videoHdrExpandGamut));
-        editor.putBoolean(VIDEO_HDR_SCANLINES_PREF_STRING, config.videoHdrScanlines);
-        editor.putString(VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING, Integer.toString(config.videoHdrSubpixelLayout));
-        editor.putBoolean(VIDEO_BFI_PREF_STRING, config.videoBlackFrameInsertion);
-        editor.putString(VIDEO_BFI_DARK_FRAMES_PREF_STRING, Integer.toString(config.videoBfiDarkFrames));
-    }
 }

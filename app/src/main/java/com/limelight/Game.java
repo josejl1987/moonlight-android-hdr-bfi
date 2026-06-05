@@ -93,7 +93,6 @@ import android.view.InputDevice;
 import android.view.KeyCharacterMap;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
-import android.view.ViewGroup;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.View;
@@ -102,6 +101,7 @@ import android.view.View.OnSystemUiVisibilityChangeListener;
 import android.view.View.OnTouchListener;
 import android.view.ViewOutlineProvider;
 import android.view.ViewParent;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -136,7 +136,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import android.view.SurfaceView;
-import android.view.ViewGroup;
 
 
 public class Game extends AppCompatActivity implements SurfaceHolder.Callback,

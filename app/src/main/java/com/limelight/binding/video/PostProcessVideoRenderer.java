@@ -22,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 
 public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAvailableListener {
     private static final int GL_TEXTURE_EXTERNAL_OES = 0x8D65;
-    private static final int STATS_INTERVAL_FRAMES = 300;
     private static final long FRAME_STALL_TIMEOUT_NS = 3_000_000_000L;
     private static final long INIT_TIMEOUT_MS = 2000;
 
@@ -89,18 +88,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int oesTransformLoc;
     private int oesTextureLoc;
 
-    private long lastFrameArrivalNs;
     private long lastSuccessfulUpdateTexImageNs;
-    private int totalRenderCalls;
     private int framesRendered;
-    private int framesSkippedNoInput;
-    private long accumulatedLatencyNs;
     private int statsFrameCount;
-
-    private int intervalRenderCalls;
-    private int intervalFramesRendered;
-    private int intervalFramesSkipped;
-    private long intervalLatencyNs;
 
     private static final float[] QUAD_VERTICES = {
             -1.0f, -1.0f,
@@ -243,7 +233,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     @Override
     public void onFrameAvailable(SurfaceTexture surfaceTexture) {
-        lastFrameArrivalNs = System.nanoTime();
         frameAvailable = true;
     }
 
@@ -414,9 +403,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             GLES20.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
         }
 
-        totalRenderCalls++;
-        intervalRenderCalls++;
-
         if (isBlack || frameStalled) {
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
@@ -463,33 +449,22 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             GLES20.glDisableVertexAttribArray(aPositionLoc);
             GLES20.glDisableVertexAttribArray(aTexCoordLoc);
 
-            if (consumedNewFrame) {
-                accumulatedLatencyNs += (nowNs - lastFrameArrivalNs);
-                intervalLatencyNs += (nowNs - lastFrameArrivalNs);
-            }
             framesRendered++;
-            intervalFramesRendered++;
         } else {
             if (!bfiScheduler.isEnabled()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
             }
-            framesSkippedNoInput++;
-            intervalFramesSkipped++;
         }
 
         if (!recoveryFailed) {
             eglContext.swapBuffers();
         }
 
-        statsFrameCount++;
-        if (statsFrameCount == 1 || statsFrameCount % 60 == 0) {
+        if (statsFrameCount == 0 || statsFrameCount % 60 == 0) {
             publishStatus();
         }
-        if (statsFrameCount >= STATS_INTERVAL_FRAMES) {
-            logStats();
-            statsFrameCount = 0;
-        }
+        statsFrameCount++;
 
         if (running && !recoveryFailed) {
             choreographer.postFrameCallback(renderFrameCallback);
@@ -497,46 +472,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     private void resetStats() {
-        lastFrameArrivalNs = 0;
         lastSuccessfulUpdateTexImageNs = 0;
-        totalRenderCalls = 0;
         framesRendered = 0;
-        framesSkippedNoInput = 0;
-        accumulatedLatencyNs = 0;
         statsFrameCount = 0;
-        intervalRenderCalls = 0;
-        intervalFramesRendered = 0;
-        intervalFramesSkipped = 0;
-        intervalLatencyNs = 0;
-    }
-
-    private void logStats() {
-        if (intervalRenderCalls == 0) return;
-
-        float avgLatencyMs = intervalFramesRendered > 0
-                ? (intervalLatencyNs / (float) intervalFramesRendered) / 1_000_000f
-                : 0f;
-
-        float renderRateHz = (float) intervalRenderCalls * displayRefreshRate / (float) statsFrameCount;
-        float actualFps = (float) intervalFramesRendered * displayRefreshRate / (float) statsFrameCount;
-
-        int renderHzTenths = Math.round(renderRateHz * 10f);
-        int fpsTenths = Math.round(actualFps * 10f);
-        int latencyHundredths = Math.round(avgLatencyMs * 100f);
-
-        LimeLog.info("PostProcess: stats interval=" + statsFrameCount
-                + " render=" + intervalRenderCalls
-                + " displayed=" + intervalFramesRendered
-                + " skipped=" + intervalFramesSkipped
-                + " renderHz=" + (renderHzTenths / 10) + "." + (renderHzTenths % 10)
-                + " fps=" + (fpsTenths / 10) + "." + (fpsTenths % 10)
-                + " avgLatency=" + (latencyHundredths / 100) + "." + (latencyHundredths % 100 < 10 ? "0" : "") + (latencyHundredths % 100) + "ms"
-                + " cumulative=" + totalRenderCalls + "/" + framesRendered);
-
-        intervalRenderCalls = 0;
-        intervalFramesRendered = 0;
-        intervalFramesSkipped = 0;
-        intervalLatencyNs = 0;
     }
 
     private void releaseGl() {
@@ -578,6 +516,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         surfaceTextureReady = false;
         hasValidTextureFrame = false;
         recoveryFailed = false;
+        applyLibretroHdrMode(LibretroHdrUniforms.HDR_MODE_OFF);
         LimeLog.info("PostProcess: GL released");
         publishStatus();
     }
@@ -691,8 +630,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         } else {
             sb.append(" | BFI=off");
         }
-        sb.append(" | frames=").append(framesRendered)
-          .append(" skipped=").append(framesSkippedNoInput);
         statusListener.onPostProcessStatusUpdate(sb.toString());
     }
 
@@ -882,6 +819,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     private void notifyHdrModeChanged() {
+        if (statusListener == null) {
+            return;
+        }
         boolean active = isHdrModeActive();
         if (active != lastHdrModeActive) {
             lastHdrModeActive = active;

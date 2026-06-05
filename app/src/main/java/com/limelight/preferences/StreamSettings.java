@@ -30,6 +30,8 @@ import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 
+import com.limelight.preferences.PreferenceConfiguration;
+
 import android.text.InputFilter;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -1001,19 +1003,19 @@ public class StreamSettings extends AppCompatActivity {
                 });
             }
 
-            // Fix post-process renderer dependency chain. ListPreference's built-in
+// Fix post-process renderer dependency chain. ListPreference's built-in
             // dependency attribute only triggers on null/empty values, but our
             // default is "0" (OFF), so children are always enabled regardless of
             // whether the renderer is actually active. Manually wire it up.
-            ListPreference ppPref  = (ListPreference) findPreference("list_postprocess_renderer");
-            ListPreference hdrPref = (ListPreference) findPreference("list_video_hdr_mode");
-            CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference("checkbox_video_bfi");
+            ListPreference ppPref  = (ListPreference) findPreference(PreferenceConfiguration.POST_PROCESS_RENDERER_PREF_STRING);
+            ListPreference hdrPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_MODE_PREF_STRING);
+            CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference(PreferenceConfiguration.VIDEO_BFI_PREF_STRING);
 
-            EditTextPreference ppWhitePref = (EditTextPreference) findPreference("list_video_hdr_paper_white_nits");
-            ListPreference ppGamutPref = (ListPreference) findPreference("list_video_hdr_expand_gamut");
-            CheckBoxPreference scanlinesPref = (CheckBoxPreference) findPreference("checkbox_video_hdr_scanlines");
-            ListPreference subpixelPref = (ListPreference) findPreference("list_video_hdr_subpixel_layout");
-            ListPreference bfiDarkFramesPref = (ListPreference) findPreference("list_video_bfi_dark_frames");
+            EditTextPreference ppWhitePref = (EditTextPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING);
+            ListPreference ppGamutPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_EXPAND_GAMUT_PREF_STRING);
+            CheckBoxPreference scanlinesPref = (CheckBoxPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_SCANLINES_PREF_STRING);
+            ListPreference subpixelPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING);
+            ListPreference bfiDarkFramesPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_BFI_DARK_FRAMES_PREF_STRING);
 
             if (ppPref != null && hdrPref != null && bfiPref != null) {
 

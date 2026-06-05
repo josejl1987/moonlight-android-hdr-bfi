@@ -26,4 +26,26 @@ public class BfiSchedulerTest {
         assertTrue(scheduler.nextIsBlack());  // black
         assertFalse(scheduler.nextIsBlack()); // visible
     }
+
+    @Test
+    public void canEnable_rejectsZeroStreamFps() {
+        assertFalse(BfiScheduler.canEnable(0f, 120f, 1));
+    }
+
+    @Test
+    public void canEnable_rejectsZeroDisplayHz() {
+        assertFalse(BfiScheduler.canEnable(60f, 0f, 1));
+    }
+
+    @Test
+    public void canEnable_acceptsExactMatch() {
+        // 60fps stream, 120Hz display, 1 dark frame → requires 120Hz (within tolerance)
+        assertTrue(BfiScheduler.canEnable(60f, 120f, 1));
+    }
+
+    @Test
+    public void canEnable_rejectsOutsideTolerance() {
+        // 60fps stream, 123.1Hz display → outside 3Hz tolerance
+        assertFalse(BfiScheduler.canEnable(60f, 123.1f, 1));
+    }
 }
