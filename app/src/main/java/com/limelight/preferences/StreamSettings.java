@@ -1018,12 +1018,11 @@ public class StreamSettings extends AppCompatActivity {
             ListPreference hdrPref = (ListPreference) findPreference("list_video_hdr_mode");
             CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference("checkbox_video_bfi");
 
-            ListPreference ppWhitePref = (ListPreference) findPreference("list_video_hdr_paper_white_nits");
+            EditTextPreference ppWhitePref = (EditTextPreference) findPreference("list_video_hdr_paper_white_nits");
             ListPreference ppGamutPref = (ListPreference) findPreference("list_video_hdr_expand_gamut");
             CheckBoxPreference scanlinesPref = (CheckBoxPreference) findPreference("checkbox_video_hdr_scanlines");
             ListPreference subpixelPref = (ListPreference) findPreference("list_video_hdr_subpixel_layout");
             ListPreference bfiDarkFramesPref = (ListPreference) findPreference("list_video_bfi_dark_frames");
-            ListPreference bfiCompPref = (ListPreference) findPreference("list_video_bfi_compensation");
 
             if (ppPref != null && hdrPref != null && bfiPref != null) {
 
