@@ -200,4 +200,58 @@
         <item>right</item>
     </string-array>
 
+    <!-- Post-process renderer modes -->
+    <string-array name="postprocess_renderer_names">
+        <item>@string/postprocess_off</item>
+        <item>@string/postprocess_auto</item>
+        <item>@string/postprocess_force</item>
+    </string-array>
+    <string-array name="postprocess_renderer_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </string-array>
+
+    <!-- libretro video_hdr_mode enum (mirrors config.def.h). -->
+    <string-array name="video_hdr_mode_names">
+        <item>@string/video_hdr_off</item>
+        <item>@string/video_hdr_hdr10</item>
+        <item>@string/video_hdr_scrgb</item>
+    </string-array>
+    <string-array name="video_hdr_mode_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+    </string-array>
+
+    <!-- video_hdr_expand_gamut enum. Values match HDR_GAMUT_* constants:
+         0 Accurate (Rec.709 → Rec.2020)
+         1 Expanded 709
+         2 DCI-P3 / Wide
+         3 Super (passthrough) -->
+    <string-array name="video_hdr_expand_gamut_names">
+        <item>@string/video_hdr_gamut_accurate</item>
+        <item>@string/video_hdr_gamut_expanded709</item>
+        <item>@string/video_hdr_gamut_wide</item>
+        <item>@string/video_hdr_gamut_super</item>
+    </string-array>
+    <string-array name="video_hdr_expand_gamut_values" translatable="false">
+        <item>0</item>
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
+    <!-- BFI dark frame count: 1 = 2-refresh cycle, 2 = 3-refresh, etc. -->
+    <string-array name="video_bfi_dark_frames_names">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+    <string-array name="video_bfi_dark_frames_values" translatable="false">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+    </string-array>
+
 </resources>

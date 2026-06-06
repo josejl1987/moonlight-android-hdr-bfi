@@ -28,6 +28,8 @@ import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
+import com.limelight.binding.video.PostProcessStatusListener;
+import com.limelight.binding.video.PostProcessVideoRenderer;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
 import com.limelight.nvstream.StreamConfiguration;
@@ -99,6 +101,7 @@ import android.view.View.OnSystemUiVisibilityChangeListener;
 import android.view.View.OnTouchListener;
 import android.view.ViewOutlineProvider;
 import android.view.ViewParent;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
@@ -133,14 +136,13 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import android.view.SurfaceView;
-import android.view.ViewGroup;
 
 
 public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         OnGenericMotionListener, OnTouchListener, NvConnectionListener, EvdevListener,
         OnSystemUiVisibilityChangeListener, GameGestures, StreamContainer.InputCallbacks,
         ExternalControllerView.InputCallbacks,
-        PerfOverlayListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
+        PerfOverlayListener, PostProcessStatusListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
     public static Game instance;
 
     private int lastButtonState = 0;
@@ -231,6 +233,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private TextView performanceOverlayBig;
 
     private MediaCodecDecoderRenderer decoderRenderer;
+    private PostProcessVideoRenderer postProcessRenderer;
+
     private boolean reportedCrash;
 
     private WifiManager.WifiLock highPerfWifiLock;
@@ -516,6 +520,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         notificationOverlayView = findViewById(R.id.notificationOverlay);
+
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
 
@@ -864,15 +869,43 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         // The connection will be started when the surface gets created
         //streamContainer.getHolder().addCallback(this);
 
+        final boolean finalWillStreamHdr = willStreamHdr;
         streamContainer.setOnSurfaceAvailable(() -> {
             if (!attemptedConnection) {
-                LimeLog.info("Surface is available, starting connection...");
                 attemptedConnection = true;
 
-                // Der Decoder erhält die jeweils aktive Oberfläche vom Container
-                decoderRenderer.setRenderTarget(streamContainer.getSurface());
+                Surface renderSurface = streamContainer.getSurface();
 
-                // Starten Sie die NvConnection
+                if (!PostProcessVideoRenderer.shouldUse(prefConfig, displayRefreshRate, finalWillStreamHdr)) {
+                    decoderRenderer.setRenderTarget(renderSurface);
+                    conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
+                            decoderRenderer, Game.this);
+                    return;
+                }
+
+                try {
+                    postProcessRenderer = new PostProcessVideoRenderer(
+                            Game.this,
+                            renderSurface,
+                            prefConfig,
+                            prefConfig.fps,
+                            displayRefreshRate,
+                            finalWillStreamHdr,
+                            Game.this
+                    );
+
+                    if (postProcessRenderer.startBlocking()) {
+                        decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
+                    } else {
+                        releasePostProcessRenderer();
+                        decoderRenderer.setRenderTarget(renderSurface);
+                    }
+                } catch (Throwable t) {
+                    LimeLog.warning("Post-process renderer failed; using direct surface: " + t);
+                    releasePostProcessRenderer();
+                    decoderRenderer.setRenderTarget(renderSurface);
+                }
+
                 conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
                         decoderRenderer, Game.this);
             }
@@ -1737,6 +1770,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             unbindService(usbDriverServiceConnection);
         }
 
+        releasePostProcessRenderer();
+
         // Destroy the capture provider
         inputCaptureProvider.destroy();
         streamContainer.onDestroy();
@@ -1774,6 +1809,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if(keyBoardLayoutController!=null){
             keyBoardLayoutController.hide();
         }
+
+        releasePostProcessRenderer();
 
         if (conn != null) {
             int videoFormat = decoderRenderer.getActiveVideoFormat();
@@ -3939,6 +3976,28 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 }
             }
         });
+    }
+
+    @Override
+    public void onPostProcessHdrModeChanged(final boolean hdrActive) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    getWindow().setColorMode(hdrActive
+                            ? ActivityInfo.COLOR_MODE_HDR
+                            : ActivityInfo.COLOR_MODE_DEFAULT);
+                    LimeLog.info("Display: setColorMode(" + (hdrActive ? "HDR" : "DEFAULT") + ")");
+                }
+            }
+        });
+    }
+
+    private void releasePostProcessRenderer() {
+        if (postProcessRenderer != null) {
+            postProcessRenderer.release();
+            postProcessRenderer = null;
+        }
     }
 
     @Override

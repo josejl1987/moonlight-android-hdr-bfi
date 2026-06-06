@@ -18,7 +18,9 @@ import android.os.Vibrator;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
+import androidx.fragment.app.Fragment;
 import androidx.fragment.app.DialogFragment;
+import androidx.fragment.app.FragmentManager;
 import androidx.preference.CheckBoxPreference;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
@@ -27,6 +29,8 @@ import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
+
+import com.limelight.preferences.PreferenceConfiguration;
 
 import android.text.InputFilter;
 import android.text.InputType;
@@ -90,7 +94,6 @@ public class StreamSettings extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-//        setTheme(R.style.AppTheme);
         super.onCreate(savedInstanceState);
 
         previousPrefs = PreferenceConfiguration.readPreferences(this);
@@ -126,16 +129,44 @@ public class StreamSettings extends AppCompatActivity {
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             Display.Mode mode = getActiveDisplay(StreamSettings.this, previousPrefs).getMode();
+            int newDisplayPixelCount = mode.getPhysicalWidth() * mode.getPhysicalHeight();
 
             // If the display's physical pixel count has changed, we consider that it's a new display
             // and we should reload our settings (which include display-dependent values).
             //
             // NB: We aren't using displayId here because that stays the same (DEFAULT_DISPLAY) when
             // switching between screens on a foldable device.
-            if (mode.getPhysicalWidth() * mode.getPhysicalHeight() != previousDisplayPixelCount) {
+            if (newDisplayPixelCount != previousDisplayPixelCount) {
+                previousDisplayPixelCount = newDisplayPixelCount;
+
+                // Preference dialogs are DialogFragments. Replacing the whole settings fragment
+                // while one is open dismisses it and feels like the settings screen closed.
+                if (isShowingDialogFragment(getSupportFragmentManager())) {
+                    LimeLog.info("Skipping settings reload while a preference dialog is showing");
+                    return;
+                }
+
                 reloadSettings();
             }
         }
+    }
+
+    private boolean isShowingDialogFragment(FragmentManager fragmentManager) {
+        for (Fragment fragment : fragmentManager.getFragments()) {
+            if (fragment == null || !fragment.isAdded()) {
+                continue;
+            }
+
+            if (fragment instanceof DialogFragment && fragment.isVisible()) {
+                return true;
+            }
+
+            if (isShowingDialogFragment(fragment.getChildFragmentManager())) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     @Override
@@ -160,6 +191,8 @@ public class StreamSettings extends AppCompatActivity {
             }
         }
     }
+
+
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
         private int nativeResolutionStartIndex = Integer.MAX_VALUE;
@@ -955,6 +988,61 @@ public class StreamSettings extends AppCompatActivity {
                         return false;
                     }
                 });
+            }
+
+            // Fix post-process renderer dependency chain. ListPreference's built-in
+            // dependency attribute only triggers on null/empty values, but our
+            // default is "0" (OFF), so children are always enabled regardless of
+            // whether the renderer is actually active. Manually wire it up.
+            ListPreference ppPref  = (ListPreference) findPreference(PreferenceConfiguration.POST_PROCESS_RENDERER_PREF_STRING);
+            ListPreference hdrPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_MODE_PREF_STRING);
+            CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference(PreferenceConfiguration.VIDEO_BFI_PREF_STRING);
+
+            EditTextPreference ppWhitePref = (EditTextPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING);
+            ListPreference ppGamutPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_EXPAND_GAMUT_PREF_STRING);
+            ListPreference bfiDarkFramesPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_BFI_DARK_FRAMES_PREF_STRING);
+
+            if (ppPref != null && hdrPref != null && bfiPref != null) {
+
+                // BFI is now enabled only when the libretro renderer is on.
+                ppPref.setOnPreferenceChangeListener((pref, newVal) -> {
+                    boolean on = !"0".equals(newVal);
+                    hdrPref.setEnabled(on);
+                    bfiPref.setEnabled(on);
+                    if (!on) {
+                        hdrPref.setValue("0");
+                    }
+                    boolean hdrOn = on && hdrPref.getValue() != null && !"0".equals(hdrPref.getValue());
+                    if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
+                    if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
+                    if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(on && bfiPref.isChecked());
+                    return true;
+                });
+
+                hdrPref.setOnPreferenceChangeListener((pref, newVal) -> {
+                    boolean on = !"0".equals(newVal);
+                    if (ppWhitePref != null) ppWhitePref.setEnabled(on);
+                    if (ppGamutPref != null) ppGamutPref.setEnabled(on);
+                    return true;
+                });
+
+                bfiPref.setOnPreferenceChangeListener((pref, newVal) -> {
+                    boolean checked = (Boolean) newVal;
+                    if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(checked);
+                    return true;
+                });
+
+                // Apply initial state
+                String curPp = ppPref.getValue();
+                boolean ppOn = curPp != null && !"0".equals(curPp);
+                hdrPref.setEnabled(ppOn);
+                bfiPref.setEnabled(ppOn);
+
+                String curHdr = hdrPref.getValue();
+                boolean hdrOn = ppOn && curHdr != null && !"0".equals(curHdr);
+                if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
+                if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
+                if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(ppOn && bfiPref.isChecked());
             }
         }
 

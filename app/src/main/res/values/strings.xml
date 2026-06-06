@@ -729,4 +729,29 @@
 
     <string name="title_checkbox_full_screen">Enable Full Screen</string>
     <string name="summary_checkbox_full_screen">Hide system bars with immersive mode</string>
+
+    <!-- Client-side post-process renderer -->
+    <string name="category_post_process">Experimental Post-Process</string>
+    <string name="title_postprocess_renderer">Post-process renderer</string>
+    <string name="summary_postprocess_renderer">Experimental client-side video processing pipeline</string>
+    <string name="postprocess_off">Off</string>
+    <string name="postprocess_auto">Auto</string>
+    <string name="postprocess_force">Force</string>
+    <string name="title_video_hdr_mode">HDR mode</string>
+    <string name="summary_video_hdr_mode">HDR output mode for the post-process renderer</string>
+    <string name="video_hdr_off">Off</string>
+    <string name="video_hdr_hdr10">HDR10 (PQ)</string>
+    <string name="video_hdr_scrgb">scRGB (FP16)</string>
+    <string name="title_video_hdr_paper_white">HDR paper white</string>
+    <string name="summary_video_hdr_paper_white">Paper white in nits for the HDR shader. RetroArch default is 200 nits.</string>
+    <string name="title_video_hdr_expand_gamut">Gamut expansion</string>
+    <string name="summary_video_hdr_expand_gamut">Expand gamut when post-processing HDR</string>
+    <string name="video_hdr_gamut_accurate">Accurate</string>
+    <string name="video_hdr_gamut_expanded709">Expanded 709</string>
+    <string name="video_hdr_gamut_wide">Wide (P3)</string>
+    <string name="video_hdr_gamut_super">Super</string>
+    <string name="title_video_bfi">Black frame insertion</string>
+    <string name="summary_video_bfi">Insert black display frames after decoding. Requires display refresh to be a clean multiple of the stream frame rate.</string>
+    <string name="title_video_bfi_dark_frames">BFI dark frames</string>
+    <string name="summary_video_bfi_dark_frames">Number of black refresh intervals inserted between visible frames</string>
 </resources>
