@@ -13,8 +13,6 @@ public class LibretroHdrUniformsTest {
         assertEquals(200.0f, u.brightnessNits, 0.0f);
         assertEquals(LibretroHdrUniforms.HDR_MODE_OFF, u.hdrMode);
         assertEquals(LibretroHdrUniforms.GAMUT_ACCURATE, u.expandGamut);
-        assertEquals(LibretroHdrUniforms.SUBPIXEL_RGB, u.subpixelLayout);
-        assertEquals(0.0f, u.scanlines, 0.0f);
         assertEquals(0.0f, u.inverseTonemap, 0.0f);
         assertEquals(0.0f, u.hdr10, 0.0f);
     }
@@ -45,13 +43,6 @@ public class LibretroHdrUniformsTest {
         assertEquals(1, LibretroHdrUniforms.GAMUT_EXPANDED);
         assertEquals(2, LibretroHdrUniforms.GAMUT_WIDE);
         assertEquals(3, LibretroHdrUniforms.GAMUT_SUPER);
-    }
-
-    @Test
-    public void subpixelEnumValuesMatchLibretroSpec() {
-        assertEquals(0, LibretroHdrUniforms.SUBPIXEL_RGB);
-        assertEquals(1, LibretroHdrUniforms.SUBPIXEL_RBG);
-        assertEquals(2, LibretroHdrUniforms.SUBPIXEL_BGR);
     }
 
     @Test

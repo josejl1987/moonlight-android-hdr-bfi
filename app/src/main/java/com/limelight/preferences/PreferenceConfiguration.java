@@ -115,8 +115,6 @@ public class PreferenceConfiguration {
     public static final String VIDEO_HDR_MODE_PREF_STRING = "list_video_hdr_mode";
     public static final String VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING = "list_video_hdr_paper_white_nits";
     public static final String VIDEO_HDR_EXPAND_GAMUT_PREF_STRING = "list_video_hdr_expand_gamut";
-    public static final String VIDEO_HDR_SCANLINES_PREF_STRING = "checkbox_video_hdr_scanlines";
-    public static final String VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING = "list_video_hdr_subpixel_layout";
     public static final String VIDEO_BFI_PREF_STRING = "checkbox_video_bfi";
     public static final String VIDEO_BFI_DARK_FRAMES_PREF_STRING = "list_video_bfi_dark_frames";
     private static final String CHECKBOX_ENABLE_QUIT_DIALOG = "checkbox_enable_quit_dialog";
@@ -221,8 +219,6 @@ public class PreferenceConfiguration {
     private static final String DEFAULT_VIDEO_HDR_MODE = "0";
     private static final String DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS = "200";
     private static final String DEFAULT_VIDEO_HDR_EXPAND_GAMUT = "0";
-    private static final boolean DEFAULT_VIDEO_HDR_SCANLINES = false;
-    private static final String DEFAULT_VIDEO_HDR_SUBPIXEL_LAYOUT = "0";
     private static final boolean DEFAULT_VIDEO_BFI = false;
     private static final String DEFAULT_VIDEO_BFI_DARK_FRAMES = "1";
     private static final boolean DEFAULT_REMEMBER_ZOOM_PAN = false;
@@ -242,10 +238,6 @@ public class PreferenceConfiguration {
     public static final int HDR_GAMUT_EXPANDED = 1;  // Expanded709 -> Rec.2020
     public static final int HDR_GAMUT_WIDE = 2;      // P3 -> Rec.2020
     public static final int HDR_GAMUT_SUPER = 3;      // passthrough (max boost)
-
-    public static final int HDR_SUBPIXEL_RGB = 0;
-    public static final int HDR_SUBPIXEL_RBG = 1;
-    public static final int HDR_SUBPIXEL_BGR = 2;
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -302,8 +294,6 @@ public class PreferenceConfiguration {
     public int videoHdrMode;
     public int videoHdrPaperWhiteNits;
     public int videoHdrExpandGamut;
-    public boolean videoHdrScanlines;
-    public int videoHdrSubpixelLayout;
     public boolean videoBlackFrameInsertion;
     public int videoBfiDarkFrames;
 
@@ -1074,11 +1064,6 @@ private static int getFramePacingValue(Context context) {
         config.videoHdrExpandGamut = getIntPref(prefs, VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT);
         if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_SUPER) {
             config.videoHdrExpandGamut = HDR_GAMUT_ACCURATE;
-        }
-        config.videoHdrScanlines = prefs.getBoolean(VIDEO_HDR_SCANLINES_PREF_STRING, DEFAULT_VIDEO_HDR_SCANLINES);
-        config.videoHdrSubpixelLayout = getIntPref(prefs, VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING, DEFAULT_VIDEO_HDR_SUBPIXEL_LAYOUT);
-        if (config.videoHdrSubpixelLayout < HDR_SUBPIXEL_RGB || config.videoHdrSubpixelLayout > HDR_SUBPIXEL_BGR) {
-            config.videoHdrSubpixelLayout = HDR_SUBPIXEL_RGB;
         }
         config.videoBlackFrameInsertion = prefs.getBoolean(VIDEO_BFI_PREF_STRING, DEFAULT_VIDEO_BFI);
         config.videoBfiDarkFrames = getIntPref(prefs, VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES);

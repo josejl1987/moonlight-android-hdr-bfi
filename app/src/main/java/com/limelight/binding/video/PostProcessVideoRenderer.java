@@ -72,8 +72,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int uSourceSizeLoc;
     private int uOutputSizeLoc;
     private int uBrightnessNitsLoc;
-    private int uSubpixelLayoutLoc;
-    private int uScanlinesLoc;
     private int uExpandGamutLoc;
     private int uInverseTonemapLoc;
     private int uHdr10Loc;
@@ -89,8 +87,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int oesTextureLoc;
 
     private long lastSuccessfulUpdateTexImageNs;
-    private int framesRendered;
-    private int statsFrameCount;
 
     private static final float[] QUAD_VERTICES = {
             -1.0f, -1.0f,
@@ -237,6 +233,21 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     private void initGl() {
+        try {
+            initGlInternal();
+        } catch (Throwable t) {
+            LimeLog.warning("PostProcess: GL init failed: " + t);
+            running = false;
+            recoveryFailed = true;
+            try {
+                releaseGl();
+            } catch (Throwable ignored) {
+            }
+            if (initLatch != null) initLatch.countDown();
+        }
+    }
+
+    private void initGlInternal() {
         String targetMode = requestedTargetMode();
         requestedEglMode = targetMode;
 
@@ -255,9 +266,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         // Initialize size uniforms. SourceSize is the decoded video frame;
         // OutputSize is the actual EGL window surface (which may differ after
-        // letterbox, scale, or rotation). The scanline / subpixel masks in
-        // the libretro shader depend on the source/output relationship being
-        // accurate.
+        // letterbox, scale, or rotation). The libretro HDR shader depends on
+        // the source/output relationship being accurate.
         hdrUniforms.sourceWidth = prefConfig.width;
         hdrUniforms.sourceHeight = prefConfig.height;
         int outW = eglContext.getSurfaceWidth();
@@ -315,8 +325,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         uSourceSizeLoc     = GLES20.glGetUniformLocation(program, "SourceSize");
         uOutputSizeLoc     = GLES20.glGetUniformLocation(program, "OutputSize");
         uBrightnessNitsLoc = GLES20.glGetUniformLocation(program, "BrightnessNits");
-        uSubpixelLayoutLoc = GLES20.glGetUniformLocation(program, "SubpixelLayout");
-        uScanlinesLoc      = GLES20.glGetUniformLocation(program, "Scanlines");
         uExpandGamutLoc    = GLES20.glGetUniformLocation(program, "ExpandGamut");
         uInverseTonemapLoc = GLES20.glGetUniformLocation(program, "InverseTonemap");
         uHdr10Loc          = GLES20.glGetUniformLocation(program, "HDR10");
@@ -330,6 +338,17 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         oesATexCoordLoc = GLES20.glGetAttribLocation(oesAdapterProgram, "aTexCoord");
         oesTransformLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexTransform");
         oesTextureLoc = GLES20.glGetUniformLocation(oesAdapterProgram, "uTexture");
+
+        if (uTextureLoc < 0 ||
+                aPositionLoc < 0 || aTexCoordLoc < 0 ||
+                oesAPositionLoc < 0 || oesATexCoordLoc < 0 ||
+                oesTransformLoc < 0 || oesTextureLoc < 0) {
+            LimeLog.warning("PostProcess: required shader attribute/uniform missing");
+            running = false;
+            recoveryFailed = true;
+            if (initLatch != null) initLatch.countDown();
+            return;
+        }
 
         quadVertexBuffer = ByteBuffer.allocateDirect(QUAD_VERTICES.length * 4)
                 .order(ByteOrder.nativeOrder())
@@ -348,7 +367,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         if (initLatch != null) initLatch.countDown();
 
         LimeLog.info("PostProcess: GL initialized, starting render loop at " + displayRefreshRate + " Hz");
-        publishStatus();
 
         choreographer.postFrameCallback(renderFrameCallback);
     }
@@ -375,7 +393,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         long nowNs = System.nanoTime();
 
         boolean isBlack = bfiScheduler.nextIsBlack();
-        boolean consumedNewFrame = false;
         boolean frameStalled = hasValidTextureFrame
                 && (nowNs - lastSuccessfulUpdateTexImageNs) > FRAME_STALL_TIMEOUT_NS;
 
@@ -396,7 +413,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             frameAvailable = false;
             hasValidTextureFrame = true;
             lastSuccessfulUpdateTexImageNs = nowNs;
-            consumedNewFrame = true;
             int[] viewport = new int[4];
             GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, viewport, 0);
             renderOesToSourceTexture();
@@ -432,8 +448,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                         1.0f / Math.max(hdrUniforms.outputHeight, 1.0f));
             }
             if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
-            if (uSubpixelLayoutLoc >= 0) GLES20.glUniform1i(uSubpixelLayoutLoc, hdrUniforms.subpixelLayout);
-            if (uScanlinesLoc >= 0) GLES20.glUniform1f(uScanlinesLoc, hdrUniforms.scanlines);
             if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
             if (uInverseTonemapLoc >= 0) GLES20.glUniform1f(uInverseTonemapLoc, hdrUniforms.inverseTonemap);
             if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
@@ -448,8 +462,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
             GLES20.glDisableVertexAttribArray(aPositionLoc);
             GLES20.glDisableVertexAttribArray(aTexCoordLoc);
-
-            framesRendered++;
         } else {
             if (!bfiScheduler.isEnabled()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f);
@@ -461,11 +473,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             eglContext.swapBuffers();
         }
 
-        if (statsFrameCount == 0 || statsFrameCount % 60 == 0) {
-            publishStatus();
-        }
-        statsFrameCount++;
-
         if (running && !recoveryFailed) {
             choreographer.postFrameCallback(renderFrameCallback);
         }
@@ -473,8 +480,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     private void resetStats() {
         lastSuccessfulUpdateTexImageNs = 0;
-        framesRendered = 0;
-        statsFrameCount = 0;
     }
 
     private void releaseGl() {
@@ -518,7 +523,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         recoveryFailed = false;
         applyLibretroHdrMode(LibretroHdrUniforms.HDR_MODE_OFF);
         LimeLog.info("PostProcess: GL released");
-        publishStatus();
     }
 
     public void updateSettings() {
@@ -534,8 +538,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // is already PQ-encoded and the EGL surface is BT.2020 PQ.
         hdrUniforms.brightnessNits  = prefConfig.videoHdrPaperWhiteNits;
         hdrUniforms.expandGamut     = clampGamut(prefConfig.videoHdrExpandGamut);
-        hdrUniforms.subpixelLayout  = clampSubpixel(prefConfig.videoHdrSubpixelLayout);
-        hdrUniforms.scanlines       = prefConfig.videoHdrScanlines ? 1.0f : 0.0f;
 
         int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
         boolean bfiActive = prefConfig.videoBlackFrameInsertion
@@ -565,18 +567,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             LimeLog.info("Libretro HDR: mode=" + hdrModeName
                     + " brightness=" + (int) hdrUniforms.brightnessNits
                     + " gamut=" + hdrUniforms.expandGamut
-                    + " scanlines=" + (hdrUniforms.scanlines > 0.0f)
-                    + " subpixel=" + hdrUniforms.subpixelLayout
                     + " bfi=" + bfiScheduler.isEnabled()
                     + " darkFrames=" + bfiScheduler.getDarkFrames());
         }
 
-        publishStatus();
         notifyHdrModeChanged();
-        notifyHdrModeUnavailableIfNeeded();
-        if (reconnectMessage != null && statusListener != null) {
-            statusListener.onPostProcessStatusUpdate(reconnectMessage);
-        }
     }
 
 
@@ -584,12 +579,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private static int clampGamut(int v) {
         if (v < LibretroHdrUniforms.GAMUT_ACCURATE) return LibretroHdrUniforms.GAMUT_ACCURATE;
         if (v > LibretroHdrUniforms.GAMUT_SUPER) return LibretroHdrUniforms.GAMUT_SUPER;
-        return v;
-    }
-
-    private static int clampSubpixel(int v) {
-        if (v < LibretroHdrUniforms.SUBPIXEL_RGB) return LibretroHdrUniforms.SUBPIXEL_RGB;
-        if (v > LibretroHdrUniforms.SUBPIXEL_BGR) return LibretroHdrUniforms.SUBPIXEL_BGR;
         return v;
     }
 
@@ -602,35 +591,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             hdrUniforms.inverseTonemap = 0.0f;
             hdrUniforms.hdr10 = 0.0f;
         }
-    }
-
-    private void publishStatus() {
-        if (statusListener == null || eglContext == null) {
-            return;
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append("PP: ").append(eglContext.getActualMode());
-        String fbDesc = eglContext.getFramebufferFormatDescription();
-        if (fbDesc != null) {
-            sb.append(" | ").append(fbDesc);
-        }
-        sb.append(" | HDR=");
-        switch (hdrUniforms.hdrMode) {
-            case LibretroHdrUniforms.HDR_MODE_HDR10:
-                sb.append("HDR10"); break;
-            case LibretroHdrUniforms.HDR_MODE_SCRGB:
-                sb.append("scRGB"); break;
-            default:
-                sb.append("OFF"); break;
-        }
-        sb.append(" ").append((int) hdrUniforms.brightnessNits).append("nits");
-        if (bfiScheduler.isEnabled()) {
-            sb.append(" | BFI=").append(bfiScheduler.getDarkFrames())
-              .append(", cycle=").append(1 + bfiScheduler.getDarkFrames());
-        } else {
-            sb.append(" | BFI=off");
-        }
-        statusListener.onPostProcessStatusUpdate(sb.toString());
     }
 
     private String requestedTargetMode() {
@@ -806,16 +766,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     private boolean isHdrModeActive() {
         return hdrUniforms.hdrMode != LibretroHdrUniforms.HDR_MODE_OFF;
-    }
-
-    private void notifyHdrModeUnavailableIfNeeded() {
-        if (statusListener == null || eglContext == null || hostHdrStreamActive) {
-            return;
-        }
-        if (prefConfig.videoHdrMode != LibretroHdrUniforms.HDR_MODE_OFF
-                && hdrUniforms.hdrMode == LibretroHdrUniforms.HDR_MODE_OFF) {
-            statusListener.onPostProcessStatusUpdate("HDR output unavailable; using SDR");
-        }
     }
 
     private void notifyHdrModeChanged() {

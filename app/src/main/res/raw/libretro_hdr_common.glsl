@@ -15,8 +15,6 @@ uniform mat4  MVP;
 uniform vec4  SourceSize;
 uniform vec4  OutputSize;
 uniform float BrightnessNits;
-uniform int   SubpixelLayout;
-uniform float Scanlines;
 uniform int   ExpandGamut;
 uniform float InverseTonemap;
 uniform float HDR10;

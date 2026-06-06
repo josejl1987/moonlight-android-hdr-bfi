@@ -226,7 +226,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean overlayToggleZoomButtonShown;
     private TextView notificationOverlayView;
     private int requestedNotificationOverlayVisibility = View.GONE;
-    private TextView postProcessOverlayView;
     private View performanceOverlayView;
 
     private TextView performanceOverlayLite;
@@ -521,7 +520,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         notificationOverlayView = findViewById(R.id.notificationOverlay);
-        postProcessOverlayView = findViewById(R.id.postProcessOverlay);
 
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
@@ -880,7 +878,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 if (!PostProcessVideoRenderer.shouldUse(prefConfig, displayRefreshRate, finalWillStreamHdr)) {
                     decoderRenderer.setRenderTarget(renderSurface);
-                    showPostProcessOverlay(false);
                     conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
                             decoderRenderer, Game.this);
                     return;
@@ -899,17 +896,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                     if (postProcessRenderer.startBlocking()) {
                         decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
-                        showPostProcessOverlay(true);
                     } else {
                         releasePostProcessRenderer();
                         decoderRenderer.setRenderTarget(renderSurface);
-                        showPostProcessOverlay(false);
                     }
                 } catch (Throwable t) {
                     LimeLog.warning("Post-process renderer failed; using direct surface: " + t);
                     releasePostProcessRenderer();
                     decoderRenderer.setRenderTarget(renderSurface);
-                    showPostProcessOverlay(false);
                 }
 
                 conn.start(new AndroidAudioRenderer(Game.this, prefConfig.playHostAudio),
@@ -1276,9 +1270,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 performanceOverlayView.setVisibility(View.GONE);
                 notificationOverlayView.setVisibility(View.GONE);
-                if (postProcessOverlayView != null) {
-                    postProcessOverlayView.setVisibility(View.GONE);
-                }
 
                 // Disable sensors while in PiP mode
                 controllerHandler.disableSensors();
@@ -1316,9 +1307,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 }
 
                 notificationOverlayView.setVisibility(requestedNotificationOverlayVisibility);
-                if (postProcessRenderer != null && postProcessOverlayView != null) {
-                    postProcessOverlayView.setVisibility(View.VISIBLE);
-                }
 
                 // Enable sensors again after exiting PiP
                 controllerHandler.enableSensors();
@@ -1783,10 +1771,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         releasePostProcessRenderer();
-        if (postProcessOverlayView != null) {
-            postProcessOverlayView.setVisibility(View.GONE);
-            postProcessOverlayView.setText("");
-        }
 
         // Destroy the capture provider
         inputCaptureProvider.destroy();
@@ -1827,7 +1811,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         releasePostProcessRenderer();
-        showPostProcessOverlay(false);
 
         if (conn != null) {
             int videoFormat = decoderRenderer.getActiveVideoFormat();
@@ -3494,7 +3477,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (connecting || connected) {
             connecting = connected = false;
             updatePipAutoEnter();
-            showPostProcessOverlay(false);
 
             controllerHandler.stop();
 
@@ -3997,19 +3979,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     @Override
-    public void onPostProcessStatusUpdate(final String text) {
-        runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                if (postProcessOverlayView != null) {
-                    postProcessOverlayView.setText(text);
-                    postProcessOverlayView.setVisibility(isHidingOverlays ? View.GONE : View.VISIBLE);
-                }
-            }
-        });
-    }
-
-    @Override
     public void onPostProcessHdrModeChanged(final boolean hdrActive) {
         runOnUiThread(new Runnable() {
             @Override
@@ -4293,21 +4262,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             }
         } else {
             performanceOverlayView.setVisibility(View.GONE);
-        }
-    }
-
-    private void showPostProcessOverlay(boolean visible) {
-        if (postProcessOverlayView == null) {
-            return;
-        }
-
-        if (visible && isHidingOverlays) {
-            return;
-        }
-
-        postProcessOverlayView.setVisibility(visible ? View.VISIBLE : View.GONE);
-        if (!visible) {
-            postProcessOverlayView.setText("");
         }
     }
 

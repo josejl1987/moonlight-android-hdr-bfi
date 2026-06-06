@@ -1013,8 +1013,6 @@ public class StreamSettings extends AppCompatActivity {
 
             EditTextPreference ppWhitePref = (EditTextPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING);
             ListPreference ppGamutPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_EXPAND_GAMUT_PREF_STRING);
-            CheckBoxPreference scanlinesPref = (CheckBoxPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_SCANLINES_PREF_STRING);
-            ListPreference subpixelPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_SUBPIXEL_LAYOUT_PREF_STRING);
             ListPreference bfiDarkFramesPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_BFI_DARK_FRAMES_PREF_STRING);
 
             if (ppPref != null && hdrPref != null && bfiPref != null) {
@@ -1030,8 +1028,6 @@ public class StreamSettings extends AppCompatActivity {
                     boolean hdrOn = on && hdrPref.getValue() != null && !"0".equals(hdrPref.getValue());
                     if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
                     if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
-                    if (scanlinesPref != null) scanlinesPref.setEnabled(hdrOn);
-                    if (subpixelPref != null) subpixelPref.setEnabled(hdrOn);
                     if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(on && bfiPref.isChecked());
                     return true;
                 });
@@ -1040,8 +1036,6 @@ public class StreamSettings extends AppCompatActivity {
                     boolean on = !"0".equals(newVal);
                     if (ppWhitePref != null) ppWhitePref.setEnabled(on);
                     if (ppGamutPref != null) ppGamutPref.setEnabled(on);
-                    if (scanlinesPref != null) scanlinesPref.setEnabled(on);
-                    if (subpixelPref != null) subpixelPref.setEnabled(on);
                     return true;
                 });
 
@@ -1061,8 +1055,6 @@ public class StreamSettings extends AppCompatActivity {
                 boolean hdrOn = ppOn && curHdr != null && !"0".equals(curHdr);
                 if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
                 if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
-                if (scanlinesPref != null) scanlinesPref.setEnabled(hdrOn);
-                if (subpixelPref != null) subpixelPref.setEnabled(hdrOn);
                 if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(ppOn && bfiPref.isChecked());
             }
         }

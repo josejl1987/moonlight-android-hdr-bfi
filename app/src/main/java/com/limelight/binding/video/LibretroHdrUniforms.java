@@ -12,10 +12,6 @@ public final class LibretroHdrUniforms {
     public static final int GAMUT_WIDE     = 2;  // P3 -> Rec.2020
     public static final int GAMUT_SUPER    = 3;  // passthrough (max boost)
 
-    public static final int SUBPIXEL_RGB   = 0;
-    public static final int SUBPIXEL_RBG   = 1;
-    public static final int SUBPIXEL_BGR   = 2;
-
     public float[] mvp = identity4x4();
 
     public float sourceWidth;
@@ -24,8 +20,6 @@ public final class LibretroHdrUniforms {
     public float outputHeight;
 
     public float brightnessNits   = 200.0f;
-    public int   subpixelLayout   = SUBPIXEL_RGB;
-    public float scanlines        = 0.0f;
     public int   expandGamut      = GAMUT_ACCURATE;
     public float inverseTonemap   = 0.0f;
     public float hdr10            = 0.0f;
