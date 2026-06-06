@@ -192,20 +192,7 @@ public class StreamSettings extends AppCompatActivity {
         }
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-    }
 
-    @Override
-    protected void onStop() {
-        super.onStop();
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-    }
 
     public static class SettingsFragment extends PreferenceFragmentCompat {
         private int nativeResolutionStartIndex = Integer.MAX_VALUE;
@@ -1003,7 +990,7 @@ public class StreamSettings extends AppCompatActivity {
                 });
             }
 
-// Fix post-process renderer dependency chain. ListPreference's built-in
+            // Fix post-process renderer dependency chain. ListPreference's built-in
             // dependency attribute only triggers on null/empty values, but our
             // default is "0" (OFF), so children are always enabled regardless of
             // whether the renderer is actually active. Manually wire it up.
