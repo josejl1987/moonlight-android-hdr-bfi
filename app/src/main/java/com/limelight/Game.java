@@ -4151,13 +4151,17 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     };
 
     /**
-     * No-op placeholder for the capture button re-enable callback. The
-     * advanced menu sets a Runnable that calls back to this method after
-     * the 2 s capture cooldown; the UI side is wired in Commit 5 alongside
-     * the test-patterns submenu, so this is intentionally a stub for now.
+     * Callback fired after the 2 s capture cooldown expires. The capture
+     * menu option is always clickable (MenuOption has no disabled state),
+     * so this is informational only — a follow-up should wire real menu
+     * cooldown state if needed.
+     *
+     * <p>TODO: Re-enable a disabled menu item if MenuOption ever gains an
+     * enabled/disabled state, or show a countdown indicator in the label.
+     * See review verdict Blocker 6.</p>
      */
     public void notifyCaptureButtonReenabled(int labelResId) {
-        // Wired in the test-UX commit that adds the capture button list.
+        // Readback and cooldown handling deferred — see readbackCaptureBitmap().
     }
 
     /**

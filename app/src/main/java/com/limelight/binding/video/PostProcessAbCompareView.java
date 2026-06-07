@@ -4,6 +4,7 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.graphics.Rect;
 import android.view.MotionEvent;
 import android.view.View;
 
@@ -12,8 +13,10 @@ import android.view.View;
  *
  * <p>Renders {@code bitmapA} on the left half of the view and
  * {@code bitmapB} on the right half, separated by a vertical divider that
- * the user can drag horizontally. Consumes all touch events so the game
- * surface beneath does not receive them.</p>
+ * the user can drag horizontally. Both bitmaps use the same full-frame
+ * {@code dst} rect with {@link Canvas#clipRect} — this avoids independent
+ * scaling artifacts. Consumes all touch events so the game surface beneath
+ * does not receive them.</p>
  *
  * <p>The View does NOT own the bitmaps — the host activity caches them and
  * recycles them in {@code onDestroy}/{@code onStop}. {@link #release()}
@@ -43,6 +46,15 @@ public final class PostProcessAbCompareView extends View {
     }
 
     @Override
+    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
+        // Start with the divider centred.
+        if (oldw == 0 && oldh == 0) {
+            dividerX = w / 2f;
+        }
+    }
+
+    @Override
     protected void onDraw(Canvas canvas) {
         int w = getWidth();
         int h = getHeight();
@@ -51,13 +63,24 @@ public final class PostProcessAbCompareView extends View {
         }
         // Clamp dividerX defensively in case onMeasure raced a touch move.
         float dx = Math.max(0f, Math.min(w, dividerX));
-        // A on left half, B on right half. The bitmaps may be 720p snapshots
-        // while the view is fullscreen — drawBitmap(null, dst) scales to fit.
-        canvas.drawBitmap(bitmapA, null,
-                new android.graphics.Rect(0, 0, (int) dx, h), bitmapPaint);
-        canvas.drawBitmap(bitmapB, null,
-                new android.graphics.Rect((int) dx, 0, w, h), bitmapPaint);
-        // White divider line down the center axis.
+        // Both bitmaps use the SAME full-frame dst rect so their scale is
+        // identical — the divider is applied via clipRect, not by slicing
+        // the dst rect (which would give each side a different scale).
+        Rect fullDst = new Rect(0, 0, w, h);
+
+        // Left half — bitmap A, clipped to divider.
+        canvas.save();
+        canvas.clipRect(0, 0, (int) dx, h);
+        canvas.drawBitmap(bitmapA, null, fullDst, bitmapPaint);
+        canvas.restore();
+
+        // Right half — bitmap B, clipped past divider.
+        canvas.save();
+        canvas.clipRect((int) dx, 0, w, h);
+        canvas.drawBitmap(bitmapB, null, fullDst, bitmapPaint);
+        canvas.restore();
+
+        // White divider line down the centre axis.
         canvas.drawLine(dx, 0f, dx, h, dividerPaint);
     }
 
@@ -68,7 +91,7 @@ public final class PostProcessAbCompareView extends View {
                 downX = event.getX();
                 dragging = true;
                 // Seed the divider at the touch point so the user can grab
-                // it from anywhere on screen, not just the initial center.
+                // it from anywhere on screen, not just the initial centre.
                 dividerX = downX;
                 invalidate();
                 return true;

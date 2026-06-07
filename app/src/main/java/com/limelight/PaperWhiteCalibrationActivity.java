@@ -2,11 +2,13 @@ package com.limelight;
 
 import android.content.SharedPreferences;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
+import android.util.Log;
+import android.view.Display;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
@@ -19,14 +21,27 @@ import androidx.preference.PreferenceManager;
 
 import com.limelight.preferences.PreferenceConfiguration;
 
+import java.util.Arrays;
+
 /**
- * Full-screen paper-white calibration wizard. Background is 200-nit
- * gray ({@code #808080}, sRGB), with a SeekBar that drives the HDR
- * paper-white nits value live (50 to 1000, step 25) and a Done/Reset
- * row. Dragging the SeekBar persists and pushes the change into the
- * live renderer through {@link Game#applyPostProcessSettingsLive()}.
+ * Paper-white paper-white nits picker.
+ *
+ * <p>This Activity lets the user choose a paper-white luminance value
+ * (50–1000 nits) that drives the HDR inverse-tone-mapping reference white.
+ * The value is persisted on stop/done and pushed to the live renderer on
+ * every slider movement so the user can see the effect immediately through
+ * the actual HDR output path (not through this SDR Activity's background).
+ * </p>
+ *
+ * <p>The background is deliberately flat dark — it does NOT attempt to
+ * preview nits via an SDR gray value. A calibrated HDR patch preview
+ * requires rendering through the post-process renderer, which is deferred
+ * to a follow-up.</p>
+ *
+ * <p>Display HDR capabilities are logged on start for diagnostics.</p>
  */
 public class PaperWhiteCalibrationActivity extends AppCompatActivity {
+    private static final String TAG = "PaperWhiteCal";
     private static final String STATE_NITS = "paper_white_nits";
 
     /** nits range and step — keep in sync with the libretro spec. */
@@ -39,38 +54,22 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     private SeekBar seekBar;
     private TextView valueText;
     private int currentNits;
-    private FrameLayout root;
-
-    /**
-     * Map a paper-white nits value to an sRGB gray for the live preview.
-     * The reference (200 nits) is fixed at #808080; lower nits goes dimmer,
-     * higher nits goes brighter. Uses a gamma-2 inverse so the perceived
-     * brightness scales the way the eye sees it.
-     */
-    private static int nitsToGrayColor(int nits) {
-        double t = nits / 200.0;
-        double srgb = Math.pow(t, 0.4545) * 128.0;
-        int gray = Math.max(20, Math.min(240, (int) srgb));
-        return 0xFF000000 | (gray << 16) | (gray << 8) | gray;
-    }
+    private int pendingNits;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // 200-nit gray background and matching system bars so the user can
-        // see what their panel's paper white looks like against a known
-        // reference. sRGB #808080 is the canonical 200 nit gray.
-        getWindow().setStatusBarColor(0xFF808080);
-        getWindow().setNavigationBarColor(0xFF808080);
+        logDisplayHdrCapabilities();
 
         prefConfig = PreferenceConfiguration.readPreferences(this);
         currentNits = (savedInstanceState != null)
                 ? savedInstanceState.getInt(STATE_NITS, prefConfig.videoHdrPaperWhiteNits)
                 : prefConfig.videoHdrPaperWhiteNits;
+        pendingNits = currentNits;
 
-        root = new FrameLayout(this);
-        root.setBackgroundColor(nitsToGrayColor(currentNits));
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(0xFF1A1A1A); // flat dark — no fake nits preview
         setContentView(root);
 
         // --- Title at the top center -----------------------------------
@@ -106,10 +105,10 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
             @Override
             public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
                 int nits = MIN_NITS + progress * STEP_NITS;
-                currentNits = nits;
+                pendingNits = nits;
                 valueText.setText(nits + " nits");
-                root.setBackgroundColor(nitsToGrayColor(nits));
-                persist(nits);
+                // Push to the live renderer immediately so the user sees the
+                // effect through the actual HDR output path.
                 pushToLiveRenderer();
             }
             @Override public void onStartTrackingTouch(SeekBar sb) { }
@@ -133,13 +132,16 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
         resetBtn.setText(R.string.paper_white_reset);
         resetBtn.setOnClickListener(v -> {
             seekBar.setProgress((DEFAULT_NITS - MIN_NITS) / STEP_NITS);
-            // onProgressChanged will persist and push.
+            // onProgressChanged will push to renderer.
         });
         buttonRow.addView(resetBtn);
 
         Button doneBtn = new Button(this);
         doneBtn.setText(R.string.paper_white_done);
-        doneBtn.setOnClickListener(v -> finish());
+        doneBtn.setOnClickListener(v -> {
+            persist(pendingNits);
+            finish();
+        });
         buttonRow.addView(doneBtn);
 
         FrameLayout.LayoutParams rowParams = new FrameLayout.LayoutParams(
@@ -151,9 +153,18 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onStop() {
+        super.onStop();
+        // Persist on stop so the value is saved even if the user navigates
+        // away without hitting Done. The renderer already has the live value
+        // from onProgressChanged pushes.
+        persist(pendingNits);
+    }
+
+    @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
-        outState.putInt(STATE_NITS, currentNits);
+        outState.putInt(STATE_NITS, pendingNits);
     }
 
     private void persist(int nits) {
@@ -168,8 +179,29 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
 
     private void pushToLiveRenderer() {
         Game game = Game.instance;
-        if (game != null) {
-            game.applyPostProcessSettingsLive();
+        if (game == null || game.isFinishing()) {
+            return;
         }
+        game.applyPostProcessSettingsLive();
+    }
+
+    /** Log display HDR capabilities for diagnostic purposes. */
+    private void logDisplayHdrCapabilities() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+            Log.i(TAG, "HDR capabilies: not available (API < N)");
+            return;
+        }
+        WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
+        if (wm == null) return;
+        Display display = wm.getDefaultDisplay();
+        Display.HdrCapabilities caps = display.getHdrCapabilities();
+        Log.i(TAG, "Supported HDR types: "
+                + Arrays.toString(caps.getSupportedHdrTypes()));
+        Log.i(TAG, "Desired max luminance: " + caps.getDesiredMaxLuminance()
+                + " cd/m²");
+        Log.i(TAG, "Desired max avg luminance: "
+                + caps.getDesiredMaxAverageLuminance() + " cd/m²");
+        Log.i(TAG, "Desired min luminance: "
+                + caps.getDesiredMinLuminance() + " cd/m²");
     }
 }

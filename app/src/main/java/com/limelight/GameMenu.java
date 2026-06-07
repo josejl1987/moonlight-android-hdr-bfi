@@ -286,8 +286,9 @@ if (!game.isOnExternalDisplay()) {
         options.add(new MenuOption(getString(R.string.game_menu_test_patterns), true, () -> showTestPatternsDialog()));
         options.add(new MenuOption(getString(R.string.game_menu_toggle_bfi), true, game::cycleRenderMode));
         options.add(new MenuOption(getString(R.string.game_menu_task_manager), true, () -> sendKeys(new short[]{KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_ESCAPE})));
-        // A/B frame capture — disables the matching button on the Game
-        // side for 2 s, then re-enables it via a Handler.postDelayed.
+        // A/B frame capture — the capture callback fires after a 2 s
+        // cooldown. MenuOption does not support a disabled state yet;
+        // see notifyCaptureButtonReenabled TODO.
         options.add(new MenuOption(getString(R.string.capture_a_label), false, () -> {
             game.captureFrameA(() -> game.notifyCaptureButtonReenabled(R.string.capture_a_label));
         }));
