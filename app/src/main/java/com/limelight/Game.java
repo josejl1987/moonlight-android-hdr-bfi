@@ -4113,6 +4113,18 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     /**
+     * Push a paper-white nits change into the live renderer's in-memory
+     * config and trigger a shader uniform update. The value is persisted
+     * to prefs by the caller (usually on stop/done).
+     */
+    public void applyPaperWhiteNitsLive(int nits) {
+        prefConfig.videoHdrPaperWhiteNits = nits;
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings();
+        }
+    }
+
+    /**
      * Launch the paper-white calibration wizard as a separate Activity.
      * The wizard persists its own pref changes and applies them live to
      * the active renderer via {@link #applyPostProcessSettingsLive()}.
@@ -4220,18 +4232,19 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private Bitmap readbackCaptureBitmap() {
         if (postProcessRenderer == null) return null;
 
-        byte[] rgba = postProcessRenderer.readbackRgba8();
+        // Renderer renders the composite shader into a capture FBO at
+        // CAPTURE size — no full-resolution allocation.
+        byte[] rgba = postProcessRenderer.readbackRgba8(CAPTURE_WIDTH, CAPTURE_HEIGHT);
         if (rgba == null) return null;
 
-        int srcW = postProcessRenderer.getRenderWidth();
-        int srcH = postProcessRenderer.getRenderHeight();
-        int stride = srcW * 4;
+        int stride = CAPTURE_WIDTH * 4;
 
         // GL readback returns rows bottom-to-left. Flip rows so the bitmap
         // has texture-top as image-top.
         byte[] flipped = new byte[rgba.length];
-        for (int y = 0; y < srcH; y++) {
-            System.arraycopy(rgba, y * stride, flipped, (srcH - 1 - y) * stride, stride);
+        for (int y = 0; y < CAPTURE_HEIGHT; y++) {
+            System.arraycopy(rgba, y * stride,
+                    flipped, (CAPTURE_HEIGHT - 1 - y) * stride, stride);
         }
 
         // Swap R and B bytes. glReadPixels(GL_RGBA) gives [R,G,B,A] but
@@ -4242,18 +4255,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             flipped[i + 2] = r;               // R → B slot
         }
 
-        // Build a bitmap from the corrected buffer.
-        Bitmap bmp = Bitmap.createBitmap(srcW, srcH, Bitmap.Config.ARGB_8888);
+        // Build a bitmap directly at capture resolution from the corrected buffer.
+        Bitmap bmp = Bitmap.createBitmap(
+                CAPTURE_WIDTH, CAPTURE_HEIGHT, Bitmap.Config.ARGB_8888);
         bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(flipped));
-
-        // Downsample to the capture resolution for heap budget.
-        if (srcW != CAPTURE_WIDTH || srcH != CAPTURE_HEIGHT) {
-            Bitmap scaled = Bitmap.createScaledBitmap(bmp, CAPTURE_WIDTH, CAPTURE_HEIGHT, true);
-            if (scaled != bmp) {
-                bmp.recycle();
-            }
-            bmp = scaled;
-        }
         return bmp;
     }
 
@@ -4318,6 +4323,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
                 case POSTPROCESS_BFI:
                     // Tear down post-process renderer, go direct.
+                    // Clear BFI state so the pref does not stay stale.
+                    prefConfig.videoBlackFrameInsertion = false;
+                    SharedPreferences.Editor bfiOff = PreferenceManager
+                            .getDefaultSharedPreferences(this).edit();
+                    bfiOff.putBoolean(
+                            PreferenceConfiguration.VIDEO_BFI_PREF_STRING, false);
+                    bfiOff.apply();
                     postProcessRenderer.release();
                     postProcessRenderer = null;
                     decoderRenderer.setRenderTarget(streamContainer.getSurface());

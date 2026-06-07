@@ -45,6 +45,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int textureId;
     private int sourceTexture2d;
     private int sourceFramebuffer;
+    private int captureFramebuffer;
+    private int captureTexture;
+    private int captureFboWidth;
+    private int captureFboHeight;
     private FloatBuffer quadVertexBuffer;
     private FloatBuffer texCoordBuffer;
     private final float[] surfaceTransform = new float[16];
@@ -218,30 +222,91 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     /**
-     * Synchronous GL readback of the current tonemapped frame. Returns raw
-     * RGBA bytes (bottom-left origin) or {@code null} on failure.
+     * Synchronous GL readback of the current tonemapped frame at the
+     * requested resolution. Renders the composite shader into a dedicated
+     * capture FBO so the output is the same tonemapped image the user sees,
+     * and at the target size (no extra full-resolution allocation).
      *
-     * <p>Caller must handle Y-flip and R/B byte swap for Android
+     * <p>Returns raw RGBA bytes (bottom-left origin) or {@code null} on
+     * failure. Caller must handle Y-flip and R/B byte swap for Android
      * {@link android.graphics.Bitmap.Config#ARGB_8888}.</p>
      */
-    public byte[] readbackRgba8() {
+    public byte[] readbackRgba8(int captureW, int captureH) {
         if (!running || renderHandler == null) return null;
-        final int w = getRenderWidth();
-        final int h = getRenderHeight();
-        if (w <= 0 || h <= 0) return null;
+        if (captureW <= 0 || captureH <= 0) return null;
 
         final CountDownLatch latch = new CountDownLatch(1);
         final byte[][] result = new byte[1][];
 
         renderHandler.post(() -> {
             try {
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, sourceFramebuffer);
-                ByteBuffer buf = ByteBuffer.allocateDirect(w * h * 4);
+                if (!hasValidTextureFrame) {
+                    latch.countDown();
+                    return;
+                }
+
+                ensureCaptureFbo(captureW, captureH);
+
+                // Render the composite shader into the capture FBO so we
+                // capture the tonemapped output, not the raw source frame.
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, captureFramebuffer);
+                GLES20.glViewport(0, 0, captureW, captureH);
+
+                GLES20.glClearColor(0f, 0f, 0f, 1f);
+                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
+
+                GLES20.glUseProgram(program);
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
+                GLES20.glUniform1i(uTextureLoc, 0);
+
+                if (uMvpLoc >= 0) {
+                    GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, hdrUniforms.mvp, 0);
+                }
+                if (uSourceSizeLoc >= 0) {
+                    GLES20.glUniform4f(uSourceSizeLoc,
+                            hdrUniforms.sourceWidth, hdrUniforms.sourceHeight,
+                            1.0f / Math.max(hdrUniforms.sourceWidth, 1.0f),
+                            1.0f / Math.max(hdrUniforms.sourceHeight, 1.0f));
+                }
+                // Report the capture dimensions as output so the shader
+                // scales correctly.
+                if (uOutputSizeLoc >= 0) {
+                    GLES20.glUniform4f(uOutputSizeLoc,
+                            (float) captureW, (float) captureH,
+                            1.0f / Math.max(captureW, 1.0f),
+                            1.0f / Math.max(captureH, 1.0f));
+                }
+                if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
+                if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
+                if (uInverseTonemapLoc >= 0) GLES20.glUniform1f(uInverseTonemapLoc, hdrUniforms.inverseTonemap);
+                if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
+                if (uHdrModeLoc >= 0) GLES20.glUniform1i(uHdrModeLoc, hdrUniforms.hdrMode);
+
+                GLES20.glEnableVertexAttribArray(aPositionLoc);
+                GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
+                GLES20.glEnableVertexAttribArray(aTexCoordLoc);
+                GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+
+                GLES20.glDisableVertexAttribArray(aPositionLoc);
+                GLES20.glDisableVertexAttribArray(aTexCoordLoc);
+
+                // Read back at capture resolution — no full-size allocation.
+                ByteBuffer buf = ByteBuffer.allocateDirect(captureW * captureH * 4);
                 buf.order(ByteOrder.nativeOrder());
-                GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+                GLES20.glReadPixels(0, 0, captureW, captureH,
+                        GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+
                 GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
 
-                byte[] pixels = new byte[w * h * 4];
+                // Restore the EGL output viewport.
+                if (surfaceWidth > 0 && surfaceHeight > 0) {
+                    GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
+                }
+
+                byte[] pixels = new byte[captureW * captureH * 4];
                 buf.rewind();
                 buf.get(pixels);
                 result[0] = pixels;
@@ -263,6 +328,47 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
 
         return result[0];
+    }
+
+    /** Create (or re-create) the capture FBO at the given size. */
+    private void ensureCaptureFbo(int w, int h) {
+        if (captureFramebuffer != 0 && captureFboWidth == w && captureFboHeight == h) {
+            return;
+        }
+        if (captureFramebuffer != 0) {
+            GLES20.glDeleteFramebuffers(1, new int[]{captureFramebuffer}, 0);
+            captureFramebuffer = 0;
+        }
+        if (captureTexture != 0) {
+            GLES20.glDeleteTextures(1, new int[]{captureTexture}, 0);
+            captureTexture = 0;
+        }
+        captureFboWidth = w;
+        captureFboHeight = h;
+
+        int[] tex = new int[1];
+        GLES20.glGenTextures(1, tex, 0);
+        captureTexture = tex[0];
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, captureTexture);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
+                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
+
+        int[] fbo = new int[1];
+        GLES20.glGenFramebuffers(1, fbo, 0);
+        captureFramebuffer = fbo[0];
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, captureFramebuffer);
+        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
+                GLES20.GL_TEXTURE_2D, captureTexture, 0);
+
+        int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
+        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
+            LimeLog.warning("PostProcess: capture FBO incomplete: 0x" + Integer.toHexString(status));
+        }
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
     }
 
     public static boolean shouldUse(
@@ -556,6 +662,14 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             if (sourceFramebuffer != 0) {
                 GLES20.glDeleteFramebuffers(1, new int[]{sourceFramebuffer}, 0);
                 sourceFramebuffer = 0;
+            }
+            if (captureFramebuffer != 0) {
+                GLES20.glDeleteFramebuffers(1, new int[]{captureFramebuffer}, 0);
+                captureFramebuffer = 0;
+            }
+            if (captureTexture != 0) {
+                GLES20.glDeleteTextures(1, new int[]{captureTexture}, 0);
+                captureTexture = 0;
             }
             if (sourceTexture2d != 0) {
                 GLES20.glDeleteTextures(1, new int[]{sourceTexture2d}, 0);

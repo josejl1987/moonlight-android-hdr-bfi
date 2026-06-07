@@ -182,7 +182,7 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
         if (game == null || game.isFinishing()) {
             return;
         }
-        game.applyPostProcessSettingsLive();
+        game.applyPaperWhiteNitsLive(pendingNits);
     }
 
     /** Log display HDR capabilities for diagnostic purposes. */
