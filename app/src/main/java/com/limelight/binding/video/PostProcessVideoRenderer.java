@@ -237,15 +237,21 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
         final CountDownLatch latch = new CountDownLatch(1);
         final byte[][] result = new byte[1][];
+        final int[] oldFramebuffer = new int[1];
+        final int[] oldViewport = new int[4];
 
         renderHandler.post(() -> {
             try {
                 if (!hasValidTextureFrame) {
-                    latch.countDown();
                     return;
                 }
 
-                ensureCaptureFbo(captureW, captureH);
+                GLES20.glGetIntegerv(GLES20.GL_FRAMEBUFFER_BINDING, oldFramebuffer, 0);
+                GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, oldViewport, 0);
+
+                if (!ensureCaptureFbo(captureW, captureH)) {
+                    return;
+                }
 
                 // Render the composite shader into the capture FBO so we
                 // capture the tonemapped output, not the raw source frame.
@@ -255,56 +261,13 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 GLES20.glClearColor(0f, 0f, 0f, 1f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
 
-                GLES20.glUseProgram(program);
-                GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
-                GLES20.glUniform1i(uTextureLoc, 0);
-
-                if (uMvpLoc >= 0) {
-                    GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, hdrUniforms.mvp, 0);
-                }
-                if (uSourceSizeLoc >= 0) {
-                    GLES20.glUniform4f(uSourceSizeLoc,
-                            hdrUniforms.sourceWidth, hdrUniforms.sourceHeight,
-                            1.0f / Math.max(hdrUniforms.sourceWidth, 1.0f),
-                            1.0f / Math.max(hdrUniforms.sourceHeight, 1.0f));
-                }
-                // Report the capture dimensions as output so the shader
-                // scales correctly.
-                if (uOutputSizeLoc >= 0) {
-                    GLES20.glUniform4f(uOutputSizeLoc,
-                            (float) captureW, (float) captureH,
-                            1.0f / Math.max(captureW, 1.0f),
-                            1.0f / Math.max(captureH, 1.0f));
-                }
-                if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
-                if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
-                if (uInverseTonemapLoc >= 0) GLES20.glUniform1f(uInverseTonemapLoc, hdrUniforms.inverseTonemap);
-                if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
-                if (uHdrModeLoc >= 0) GLES20.glUniform1i(uHdrModeLoc, hdrUniforms.hdrMode);
-
-                GLES20.glEnableVertexAttribArray(aPositionLoc);
-                GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
-                GLES20.glEnableVertexAttribArray(aTexCoordLoc);
-                GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
-
-                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-                GLES20.glDisableVertexAttribArray(aPositionLoc);
-                GLES20.glDisableVertexAttribArray(aTexCoordLoc);
+                drawComposite(captureW, captureH);
 
                 // Read back at capture resolution — no full-size allocation.
                 ByteBuffer buf = ByteBuffer.allocateDirect(captureW * captureH * 4);
                 buf.order(ByteOrder.nativeOrder());
                 GLES20.glReadPixels(0, 0, captureW, captureH,
                         GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
-
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-
-                // Restore the EGL output viewport.
-                if (surfaceWidth > 0 && surfaceHeight > 0) {
-                    GLES20.glViewport(0, 0, surfaceWidth, surfaceHeight);
-                }
 
                 byte[] pixels = new byte[captureW * captureH * 4];
                 buf.rewind();
@@ -313,6 +276,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             } catch (Exception e) {
                 LimeLog.warning("PostProcess: readback failed: " + e);
             } finally {
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, oldFramebuffer[0]);
+                GLES20.glViewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]);
                 latch.countDown();
             }
         });
@@ -331,9 +296,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     }
 
     /** Create (or re-create) the capture FBO at the given size. */
-    private void ensureCaptureFbo(int w, int h) {
+    private boolean ensureCaptureFbo(int w, int h) {
         if (captureFramebuffer != 0 && captureFboWidth == w && captureFboHeight == h) {
-            return;
+            return true;
         }
         if (captureFramebuffer != 0) {
             GLES20.glDeleteFramebuffers(1, new int[]{captureFramebuffer}, 0);
@@ -367,8 +332,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
         if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
             LimeLog.warning("PostProcess: capture FBO incomplete: 0x" + Integer.toHexString(status));
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+            return false;
         }
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+        return true;
     }
 
     public static boolean shouldUse(
@@ -589,43 +557,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         } else if (hasValidTextureFrame) {
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-            GLES20.glUseProgram(program);
-
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
-            GLES20.glUniform1i(uTextureLoc, 0);
-
-            if (uMvpLoc >= 0) {
-                GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, hdrUniforms.mvp, 0);
-            }
-            if (uSourceSizeLoc >= 0) {
-                GLES20.glUniform4f(uSourceSizeLoc,
-                        hdrUniforms.sourceWidth, hdrUniforms.sourceHeight,
-                        1.0f / Math.max(hdrUniforms.sourceWidth, 1.0f),
-                        1.0f / Math.max(hdrUniforms.sourceHeight, 1.0f));
-            }
-            if (uOutputSizeLoc >= 0) {
-                GLES20.glUniform4f(uOutputSizeLoc,
-                        hdrUniforms.outputWidth, hdrUniforms.outputHeight,
-                        1.0f / Math.max(hdrUniforms.outputWidth, 1.0f),
-                        1.0f / Math.max(hdrUniforms.outputHeight, 1.0f));
-            }
-            if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
-            if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
-            if (uInverseTonemapLoc >= 0) GLES20.glUniform1f(uInverseTonemapLoc, hdrUniforms.inverseTonemap);
-            if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
-            if (uHdrModeLoc >= 0) GLES20.glUniform1i(uHdrModeLoc, hdrUniforms.hdrMode);
-
-            GLES20.glEnableVertexAttribArray(aPositionLoc);
-            GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
-            GLES20.glEnableVertexAttribArray(aTexCoordLoc);
-            GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
-
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-            GLES20.glDisableVertexAttribArray(aPositionLoc);
-            GLES20.glDisableVertexAttribArray(aTexCoordLoc);
+            drawComposite(hdrUniforms.outputWidth, hdrUniforms.outputHeight);
         } else {
             if (!bfiScheduler.isEnabled()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f);
@@ -640,6 +572,54 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         if (running && !recoveryFailed) {
             choreographer.postFrameCallback(renderFrameCallback);
         }
+    }
+
+    /**
+     * Draw the already-adapted 2D source texture through the libretro HDR
+     * composite shader. Used by both visible rendering and A/B capture, so
+     * captures cannot silently drift from what the user sees.
+     */
+    private void drawComposite(float outputW, float outputH) {
+        GLES20.glUseProgram(program);
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
+        GLES20.glUniform1i(uTextureLoc, 0);
+
+        uploadCompositeUniforms(outputW, outputH);
+
+        GLES20.glEnableVertexAttribArray(aPositionLoc);
+        GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
+        GLES20.glEnableVertexAttribArray(aTexCoordLoc);
+        GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+
+        GLES20.glDisableVertexAttribArray(aPositionLoc);
+        GLES20.glDisableVertexAttribArray(aTexCoordLoc);
+    }
+
+    private void uploadCompositeUniforms(float outputW, float outputH) {
+        if (uMvpLoc >= 0) {
+            GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, hdrUniforms.mvp, 0);
+        }
+        if (uSourceSizeLoc >= 0) {
+            GLES20.glUniform4f(uSourceSizeLoc,
+                    hdrUniforms.sourceWidth, hdrUniforms.sourceHeight,
+                    1.0f / Math.max(hdrUniforms.sourceWidth, 1.0f),
+                    1.0f / Math.max(hdrUniforms.sourceHeight, 1.0f));
+        }
+        if (uOutputSizeLoc >= 0) {
+            GLES20.glUniform4f(uOutputSizeLoc,
+                    outputW, outputH,
+                    1.0f / Math.max(outputW, 1.0f),
+                    1.0f / Math.max(outputH, 1.0f));
+        }
+        if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
+        if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
+        if (uInverseTonemapLoc >= 0) GLES20.glUniform1f(uInverseTonemapLoc, hdrUniforms.inverseTonemap);
+        if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
+        if (uHdrModeLoc >= 0) GLES20.glUniform1i(uHdrModeLoc, hdrUniforms.hdrMode);
     }
 
     private void resetStats() {
@@ -666,6 +646,8 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
             if (captureFramebuffer != 0) {
                 GLES20.glDeleteFramebuffers(1, new int[]{captureFramebuffer}, 0);
                 captureFramebuffer = 0;
+                captureFboWidth = 0;
+                captureFboHeight = 0;
             }
             if (captureTexture != 0) {
                 GLES20.glDeleteTextures(1, new int[]{captureTexture}, 0);

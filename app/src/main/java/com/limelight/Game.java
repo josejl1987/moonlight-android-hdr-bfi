@@ -24,6 +24,7 @@ import com.limelight.binding.input.touch.TrackpadContext;
 import com.limelight.binding.input.virtual_controller.VirtualController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
+import com.limelight.binding.video.CaptureBitmapConverter;
 import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.GamutCycle;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
@@ -4237,28 +4238,14 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         byte[] rgba = postProcessRenderer.readbackRgba8(CAPTURE_WIDTH, CAPTURE_HEIGHT);
         if (rgba == null) return null;
 
-        int stride = CAPTURE_WIDTH * 4;
-
-        // GL readback returns rows bottom-to-left. Flip rows so the bitmap
-        // has texture-top as image-top.
-        byte[] flipped = new byte[rgba.length];
-        for (int y = 0; y < CAPTURE_HEIGHT; y++) {
-            System.arraycopy(rgba, y * stride,
-                    flipped, (CAPTURE_HEIGHT - 1 - y) * stride, stride);
-        }
-
-        // Swap R and B bytes. glReadPixels(GL_RGBA) gives [R,G,B,A] but
-        // Android ARGB_8888 (little-endian) stores [B,G,R,A] per pixel.
-        for (int i = 0; i < flipped.length; i += 4) {
-            byte r = flipped[i];
-            flipped[i]     = flipped[i + 2];  // B → R slot
-            flipped[i + 2] = r;               // R → B slot
-        }
+        byte[] argb = CaptureBitmapConverter.rgbaBottomLeftToArgb8888TopLeft(
+                rgba, CAPTURE_WIDTH, CAPTURE_HEIGHT);
+        if (argb == null) return null;
 
         // Build a bitmap directly at capture resolution from the corrected buffer.
         Bitmap bmp = Bitmap.createBitmap(
                 CAPTURE_WIDTH, CAPTURE_HEIGHT, Bitmap.Config.ARGB_8888);
-        bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(flipped));
+        bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(argb));
         return bmp;
     }
 
