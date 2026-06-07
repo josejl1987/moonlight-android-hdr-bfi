@@ -4218,11 +4218,43 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
      * the byte buffer is the wrong size.
      */
     private Bitmap readbackCaptureBitmap() {
-        // Readback API not available on this branch — deferred to PR 2C.
-        if (postProcessRenderer == null) {
-            return null;
+        if (postProcessRenderer == null) return null;
+
+        byte[] rgba = postProcessRenderer.readbackRgba8();
+        if (rgba == null) return null;
+
+        int srcW = postProcessRenderer.getRenderWidth();
+        int srcH = postProcessRenderer.getRenderHeight();
+        int stride = srcW * 4;
+
+        // GL readback returns rows bottom-to-left. Flip rows so the bitmap
+        // has texture-top as image-top.
+        byte[] flipped = new byte[rgba.length];
+        for (int y = 0; y < srcH; y++) {
+            System.arraycopy(rgba, y * stride, flipped, (srcH - 1 - y) * stride, stride);
         }
-        return null;
+
+        // Swap R and B bytes. glReadPixels(GL_RGBA) gives [R,G,B,A] but
+        // Android ARGB_8888 (little-endian) stores [B,G,R,A] per pixel.
+        for (int i = 0; i < flipped.length; i += 4) {
+            byte r = flipped[i];
+            flipped[i]     = flipped[i + 2];  // B → R slot
+            flipped[i + 2] = r;               // R → B slot
+        }
+
+        // Build a bitmap from the corrected buffer.
+        Bitmap bmp = Bitmap.createBitmap(srcW, srcH, Bitmap.Config.ARGB_8888);
+        bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(flipped));
+
+        // Downsample to the capture resolution for heap budget.
+        if (srcW != CAPTURE_WIDTH || srcH != CAPTURE_HEIGHT) {
+            Bitmap scaled = Bitmap.createScaledBitmap(bmp, CAPTURE_WIDTH, CAPTURE_HEIGHT, true);
+            if (scaled != bmp) {
+                bmp.recycle();
+            }
+            bmp = scaled;
+        }
+        return bmp;
     }
 
     /**

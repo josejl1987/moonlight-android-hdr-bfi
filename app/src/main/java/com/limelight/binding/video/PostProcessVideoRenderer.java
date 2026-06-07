@@ -207,6 +207,64 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         stop();
     }
 
+    /** Current render surface width, in pixels. */
+    public int getRenderWidth() {
+        return surfaceWidth > 0 ? surfaceWidth : prefConfig.width;
+    }
+
+    /** Current render surface height, in pixels. */
+    public int getRenderHeight() {
+        return surfaceHeight > 0 ? surfaceHeight : prefConfig.height;
+    }
+
+    /**
+     * Synchronous GL readback of the current tonemapped frame. Returns raw
+     * RGBA bytes (bottom-left origin) or {@code null} on failure.
+     *
+     * <p>Caller must handle Y-flip and R/B byte swap for Android
+     * {@link android.graphics.Bitmap.Config#ARGB_8888}.</p>
+     */
+    public byte[] readbackRgba8() {
+        if (!running || renderHandler == null) return null;
+        final int w = getRenderWidth();
+        final int h = getRenderHeight();
+        if (w <= 0 || h <= 0) return null;
+
+        final CountDownLatch latch = new CountDownLatch(1);
+        final byte[][] result = new byte[1][];
+
+        renderHandler.post(() -> {
+            try {
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, sourceFramebuffer);
+                ByteBuffer buf = ByteBuffer.allocateDirect(w * h * 4);
+                buf.order(ByteOrder.nativeOrder());
+                GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
+                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+
+                byte[] pixels = new byte[w * h * 4];
+                buf.rewind();
+                buf.get(pixels);
+                result[0] = pixels;
+            } catch (Exception e) {
+                LimeLog.warning("PostProcess: readback failed: " + e);
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        try {
+            if (!latch.await(500, TimeUnit.MILLISECONDS)) {
+                LimeLog.warning("PostProcess: readback timed out");
+                return null;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+
+        return result[0];
+    }
+
     public static boolean shouldUse(
             PreferenceConfiguration prefs,
             float displayRefreshRate,
