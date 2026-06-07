@@ -160,7 +160,9 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
         prefConfig.videoHdrPaperWhiteNits = nits;
         SharedPreferences.Editor editor = PreferenceManager
                 .getDefaultSharedPreferences(this).edit();
-        PreferenceConfiguration.writePostProcessPreferences(editor, prefConfig);
+        editor.putInt(
+                PreferenceConfiguration.VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING,
+                nits);
         editor.apply();
     }
 

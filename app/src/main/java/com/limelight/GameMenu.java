@@ -284,7 +284,7 @@ if (!game.isOnExternalDisplay()) {
         options.add(new MenuOption(getString(R.string.game_menu_toggle_virtual_keyboard_model), true, game::toggleFullKeyboard));
         options.add(new MenuOption(getString(R.string.game_menu_calibrate_paper_white), true, () -> game.launchPaperWhiteCalibration()));
         options.add(new MenuOption(getString(R.string.game_menu_test_patterns), true, () -> showTestPatternsDialog()));
-        options.add(new MenuOption(getString(R.string.game_menu_toggle_bfi), true, game::cycleBfiMode));
+        options.add(new MenuOption(getString(R.string.game_menu_toggle_bfi), true, game::cycleRenderMode));
         options.add(new MenuOption(getString(R.string.game_menu_task_manager), true, () -> sendKeys(new short[]{KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_ESCAPE})));
         // A/B frame capture — disables the matching button on the Game
         // side for 2 s, then re-enables it via a Handler.postDelayed.

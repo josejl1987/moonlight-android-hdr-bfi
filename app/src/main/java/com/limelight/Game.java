@@ -27,10 +27,12 @@ import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutCon
 import com.limelight.binding.video.CrashListener;
 import com.limelight.binding.video.GamutCycle;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
+import com.limelight.binding.video.RenderModeResolver;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
 import com.limelight.binding.video.PostProcessAbCompareView;
 import com.limelight.binding.video.PostProcessStatusListener;
+import com.limelight.binding.video.RenderModeResolver.RenderMode;
 import com.limelight.binding.video.PostProcessVideoRenderer;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
@@ -188,8 +190,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private int displayHeight;
     private int currentOrientation;
     // Display refresh rate captured at stream start, reused by the live
-    // BFI toggle so it can build a fresh BfiOnlyRenderer / PostProcess
-    // renderer without re-running prepareDisplayForRendering().
+    // Live BFI toggle can build a fresh PostProcessVideoRenderer
+    // without re-running prepareDisplayForRendering().
     private float currentDisplayRefreshRate;
 
     public NvConnection conn;
@@ -245,24 +247,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     private boolean reportedCrash;
 
-    // BFI toggle state machine. Cycles through the three render modes on
-    // each press. The enum lives here (not in BfiScheduler) because the
-    // post-process / BFI-only / SDR choice is a Game-level concern.
-    private BfiMode currentBfiMode = BfiMode.SDR;
-    private boolean lastStallWarningShown = false;
-
-    private enum BfiMode {
-        SDR, BFI_ONLY, POST_PROCESS;
-
-        public BfiMode next() {
-            switch (this) {
-                case SDR:          return BFI_ONLY;
-                case BFI_ONLY:     return POST_PROCESS;
-                case POST_PROCESS: return SDR;
-                default:           return SDR;
-            }
-        }
-    }
+    // Render mode is derived from postProcessRenderer presence + prefs.
+    // currentRenderMode() is the single source of truth — no stored field.
 
     // A/B frame capture state (test-UX). Bitmaps are owned by this Activity
     // and recycled in onDestroy/onStop. The capture readback downsamples to
@@ -4107,13 +4093,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         prefConfig.videoHdrExpandGamut = next;
         SharedPreferences.Editor editor = PreferenceManager
                 .getDefaultSharedPreferences(this).edit();
-        PreferenceConfiguration.writePostProcessPreferences(editor, prefConfig);
+        PreferenceConfiguration.writePostProcessGamutPreference(editor, next);
         editor.apply();
         if (postProcessRenderer != null) {
             postProcessRenderer.updateSettings();
-        }
-        if (bfiOnlyRenderer != null) {
-            bfiOnlyRenderer.updateSettings();
         }
         flashPostProcessOverlay("Gamut: " + GamutCycle.name(next), 1000);
     }
@@ -4126,9 +4109,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     public void applyPostProcessSettingsLive() {
         if (postProcessRenderer != null) {
             postProcessRenderer.updateSettings();
-        }
-        if (bfiOnlyRenderer != null) {
-            bfiOnlyRenderer.updateSettings();
         }
     }
 
@@ -4234,29 +4214,32 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
      * the byte buffer is the wrong size.
      */
     private Bitmap readbackCaptureBitmap() {
+        // Readback API not available on this branch — deferred to PR 2C.
         if (postProcessRenderer == null) {
-            Toast.makeText(this, R.string.capture_error_stream_stopped, Toast.LENGTH_SHORT).show();
             return null;
         }
-        byte[] rgba = postProcessRenderer.readbackTonemapRgba8(CAPTURE_WIDTH, CAPTURE_HEIGHT);
-        if (rgba == null || rgba.length != CAPTURE_WIDTH * CAPTURE_HEIGHT * 4) {
-            return null;
-        }
-        Bitmap bmp = Bitmap.createBitmap(CAPTURE_WIDTH, CAPTURE_HEIGHT, Bitmap.Config.ARGB_8888);
-        java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(rgba);
-        bmp.copyPixelsFromBuffer(buf);
-        return bmp;
+        return null;
     }
 
     /**
-     * Cycle the active BFI render mode: SDR -> BfiOnlyRenderer ->
-     * PostProcessVideoRenderer -> SDR. The whole sequence runs on the UI
-     * thread (the existing startBlocking()/stop() contracts block for up
-     * to 2s each) and is wrapped in a {@link SpinnerDialog} so the user
-     * has feedback. After the cycle, a stall warning toast fires if the
-     * new renderer reports isFrameStalled() == true.
+     * Derive the current render mode from renderer presence and prefs.
+     * This is the single source of truth — no stored mode field.
      */
-    public void cycleBfiMode() {
+    private RenderMode currentRenderMode() {
+        return RenderModeResolver.resolve(postProcessRenderer != null, prefConfig.videoBlackFrameInsertion);
+    }
+
+    /**
+     * Cycle the active render mode: DIRECT → POSTPROCESS →
+     * POSTPROCESS_BFI → DIRECT. The whole sequence runs on the UI thread
+     * (the existing startBlocking()/stop() contracts block for up to 2s
+     * each) and is wrapped in a {@link SpinnerDialog} so the user has
+     * feedback.
+     *
+     * <p>BFI mode is derived from the renderer + pref — there is no
+     * separate state field (DRY / single source of truth).</p>
+     */
+    public void cycleRenderMode() {
         // Wrapped in try/finally so the spinner always closes, even if a
         // renderer init throws. See discovery-bfi-toggle-blocks.
         SpinnerDialog.displayDialog(this,
@@ -4264,43 +4247,18 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                 getString(R.string.bfi_toggle_msg),
                 true);
         try {
-            stopActiveRenderer();
-            BfiMode next = currentBfiMode.next();
-            Surface renderSurface = streamContainer.getSurface();
-            switch (next) {
-                case SDR:
-                    decoderRenderer.setRenderTarget(renderSurface);
-                    break;
-                case BFI_ONLY:
-                    bfiOnlyRenderer = new BfiOnlyRenderer(
-                            this,
-                            renderSurface,
-                            prefConfig,
-                            prefConfig.fps,
-                            currentDisplayRefreshRate,
-                            getWindow(),
-                            getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY),
-                            this
-                    );
-                    if (bfiOnlyRenderer.startBlocking()) {
-                        decoderRenderer.setRenderTarget(bfiOnlyRenderer.getCodecSurface());
-                    } else {
-                        bfiOnlyRenderer.release();
-                        bfiOnlyRenderer = null;
-                        decoderRenderer.setRenderTarget(renderSurface);
-                        next = BfiMode.SDR;
-                    }
-                    break;
-                case POST_PROCESS:
+            switch (currentRenderMode()) {
+                case DIRECT:
+                    // Build the post-process renderer, BFI initially off.
+                    prefConfig.videoBlackFrameInsertion = false;
+                    Surface renderSurface = streamContainer.getSurface();
                     postProcessRenderer = new PostProcessVideoRenderer(
                             this,
                             renderSurface,
                             prefConfig,
                             prefConfig.fps,
                             currentDisplayRefreshRate,
-                            false, // willStreamHdr re-evaluated by decide()
-                            getWindow(),
-                            getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY),
+                            false, // hostHdrStreamActive — re-evaluated by decide()
                             this
                     );
                     if (postProcessRenderer.startBlocking()) {
@@ -4308,15 +4266,29 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
                     } else {
                         postProcessRenderer.release();
                         postProcessRenderer = null;
-                        decoderRenderer.setRenderTarget(renderSurface);
-                        next = BfiMode.SDR;
+                        decoderRenderer.setRenderTarget(streamContainer.getSurface());
                     }
                     break;
+
+                case POSTPROCESS:
+                    // Enable BFI on the already-active post-process renderer.
+                    prefConfig.videoBlackFrameInsertion = true;
+                    SharedPreferences.Editor bfiEditor = PreferenceManager
+                            .getDefaultSharedPreferences(this).edit();
+                    bfiEditor.putBoolean(PreferenceConfiguration.VIDEO_BFI_PREF_STRING, true);
+                    bfiEditor.apply();
+                    postProcessRenderer.updateSettings();
+                    break;
+
+                case POSTPROCESS_BFI:
+                    // Tear down post-process renderer, go direct.
+                    postProcessRenderer.release();
+                    postProcessRenderer = null;
+                    decoderRenderer.setRenderTarget(streamContainer.getSurface());
+                    break;
             }
-            currentBfiMode = next;
-            checkStallAndToast();
         } catch (Throwable t) {
-            LimeLog.warning("BFI toggle failed: " + t);
+            LimeLog.warning("Render mode toggle failed: " + t);
         } finally {
             SpinnerDialog.closeDialogs(this);
         }
@@ -4331,34 +4303,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
             postProcessRenderer.release();
             postProcessRenderer = null;
         }
-        if (bfiOnlyRenderer != null) {
-            bfiOnlyRenderer.release();
-            bfiOnlyRenderer = null;
-        }
         if (decoderRenderer != null && streamContainer != null) {
             decoderRenderer.setRenderTarget(streamContainer.getSurface());
         }
     }
 
-    /**
-     * Read the active renderer's isFrameStalled() and, if true, show a
-     * one-shot toast. The flag is cleared as soon as the stream recovers
-     * so the same stall event does not re-trigger the toast.
-     */
-    private void checkStallAndToast() {
-        boolean stalled = false;
-        if (postProcessRenderer != null) {
-            stalled = postProcessRenderer.isFrameStalled();
-        } else if (bfiOnlyRenderer != null) {
-            stalled = bfiOnlyRenderer.isFrameStalled();
-        }
-        if (stalled && !lastStallWarningShown) {
-            Toast.makeText(this, R.string.bfi_stall_warning, Toast.LENGTH_LONG).show();
-            lastStallWarningShown = true;
-        } else if (!stalled) {
-            lastStallWarningShown = false;
-        }
-    }
+    /** Stub kept for compile compatibility. Renderer stall detection
+     *  was not available on this branch; callers no longer need it. */
 
     @Override
     public void onUsbPermissionPromptStarting() {

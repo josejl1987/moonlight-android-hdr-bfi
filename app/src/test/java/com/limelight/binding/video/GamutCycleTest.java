@@ -17,16 +17,28 @@ public class GamutCycleTest {
     }
 
     @Test
+    public void nextAdvancesWideToSuper() {
+        assertEquals(GAMUT_SUPER, GamutCycle.next(GAMUT_WIDE));
+    }
+
+    @Test
     public void nextWrapsSuperBackToAccurate() {
         assertEquals(GAMUT_ACCURATE, GamutCycle.next(GAMUT_SUPER));
     }
 
     @Test
+    public void nextUnknownValueDefaultsToAccurate() {
+        assertEquals(GAMUT_ACCURATE, GamutCycle.next(-1));
+        assertEquals(GAMUT_ACCURATE, GamutCycle.next(99));
+        assertEquals(GAMUT_ACCURATE, GamutCycle.next(Integer.MAX_VALUE));
+    }
+
+    @Test
     public void nameReturnsNonEmptyLabelForEveryKnownValue() {
-        assertEquals("Accurate", GamutCycle.name(GAMUT_ACCURATE));
-        assertEquals("Expanded", GamutCycle.name(GAMUT_EXPANDED));
-        assertEquals("Wide",     GamutCycle.name(GAMUT_WIDE));
-        assertEquals("Super",    GamutCycle.name(GAMUT_SUPER));
+        assertEquals("Rec.709 accurate",           GamutCycle.name(GAMUT_ACCURATE));
+        assertEquals("Rec.709 \u2192 P3 expansion",   GamutCycle.name(GAMUT_EXPANDED));
+        assertEquals("Rec.709 \u2192 BT.2020 expansion", GamutCycle.name(GAMUT_WIDE));
+        assertEquals("Oversaturation debug",        GamutCycle.name(GAMUT_SUPER));
     }
 
     @Test
