@@ -317,6 +317,13 @@ public class AppView extends AppCompatActivity implements AdapterFragmentCallbac
         findViewById(R.id.profilesButton)
             .setOnClickListener(v -> startActivity(new Intent(this, ProfilesActivity.class)));
 
+        // Setup the test patterns button (dev/test entry point — opens
+        // the local synthetic pattern activity so the user can exercise
+        // the libretro HDR shader / BFI scheduler without a host stream).
+        findViewById(R.id.testPatternsButton)
+            .setOnClickListener(v -> startActivity(
+                new Intent(this, LocalTestPatternActivity.class)));
+
         showHiddenApps = getIntent().getBooleanExtra(SHOW_HIDDEN_APPS_EXTRA, false);
         uuidString = getIntent().getStringExtra(UUID_EXTRA);
 
