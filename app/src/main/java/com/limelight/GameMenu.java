@@ -2,8 +2,6 @@ package com.limelight;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.content.ClipData;
-import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.os.Handler;
@@ -44,26 +42,18 @@ public class GameMenu implements Game.GameMenuCallbacks {
     public static class MenuOption {
         private final String label;
         private final boolean withGameFocus;
-        private final boolean keepOpen;
         private final Runnable runnable;
 
-        public MenuOption(String label, boolean withGameFocus, boolean keepOpen, Runnable runnable) {
+        public MenuOption(String label, boolean withGameFocus, Runnable runnable) {
             this.label = label;
             this.withGameFocus = withGameFocus;
-            this.keepOpen = keepOpen;
             this.runnable = runnable;
         }
 
-        public MenuOption(String label, boolean withGameFocus, Runnable runnable) {
-            this(label, withGameFocus, false, runnable);
-        }
-
         public MenuOption(String label, Runnable runnable) {
-            this(label, false, false, runnable);
-        }
-
-        public boolean isKeepOpen() {
-            return keepOpen;
+            this.label = label;
+            this.withGameFocus = false;
+            this.runnable = runnable;
         }
     }
 
@@ -130,12 +120,7 @@ public class GameMenu implements Game.GameMenuCallbacks {
             String label = actions.getItem(which);
             for (MenuOption option : options) {
                 if (label != null && label.equals(option.label)) {
-                    // Honour the keepOpen flag: when true, the dialog stays
-                    // open so the user can hit the same virtual key several
-                    // times in a row (e.g. gamut cycling).
-                    if (!option.isKeepOpen()) {
-                        dialog.dismiss();
-                    }
+                    dialog.dismiss();
                     run(option);
                     break;
                 }
@@ -256,11 +241,8 @@ public class GameMenu implements Game.GameMenuCallbacks {
             }
         }
 
-        // Live HDR gamut hot-toggle. keepOpen=true so the user can cycle
-        // several times without re-opening the menu (REQ-4-5).
         options.add(new MenuOption(getString(R.string.game_menu_cycle_gamut),
-                /*withGameFocus*/ true, /*keepOpen*/ true,
-                () -> game.cycleGamut()));
+                true, () -> game.cycleGamut()));
 
         options.add(new MenuOption(getString(R.string.game_menu_cancel), null));
 
@@ -281,13 +263,9 @@ if (!game.isOnExternalDisplay()) {
         }
         options.add(new MenuOption(getString(R.string.game_menu_toggle_virtual_keyboard_model), true, game::toggleFullKeyboard));
         options.add(new MenuOption(getString(R.string.game_menu_calibrate_paper_white), true, () -> game.launchPaperWhiteCalibration()));
-        options.add(new MenuOption(getString(R.string.game_menu_test_patterns), true, () -> showTestPatternsDialog()));
         options.add(new MenuOption(getString(R.string.game_menu_toggle_bfi), true, game::cycleRenderMode));
         options.add(new MenuOption(getString(R.string.game_menu_task_manager), true, () -> sendKeys(new short[]{KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_ESCAPE})));
-        options.add(new MenuOption(getString(R.string.capture_a_label), false, game::captureFrameA));
-        options.add(new MenuOption(getString(R.string.capture_b_label), false, game::captureFrameB));
-        options.add(new MenuOption(getString(R.string.compare_ab_label), false, () -> game.openCompareView()));
-        options.add(new MenuOption(getString(R.string.clear_captures_label), false, () -> game.clearCaptures()));
+
 
         // **FIXED:** This is a UI navigation action, so it should not use withGameFocus.
         options.add(new MenuOption(getString(R.string.game_menu_send_keys), () -> {
@@ -363,32 +341,6 @@ if (!game.isOnExternalDisplay()) {
         options.add(new MenuOption(getString(R.string.game_menu_cancel), null));
 
         showMenuDialog(getString(R.string.quick_menu_title), options.toArray(new MenuOption[options.size()]));
-    }
-
-    private void showTestPatternsDialog() {
-        final String[][] rows = {
-                {getString(R.string.testufo_blackframes), "https://www.testufo.com/blackframes"},
-                {getString(R.string.testufo_eyetracking), "https://www.testufo.com/eyetracking"},
-                {getString(R.string.testufo_photo),       "https://www.testufo.com/photo"},
-                {getString(R.string.testufo_starfield),   "https://www.testufo.com/starfield"},
-        };
-        CharSequence[] items = new CharSequence[rows.length];
-        for (int i = 0; i < rows.length; i++) {
-            items[i] = rows[i][0] + "\n" + rows[i][1];
-        }
-        new AlertDialog.Builder(dialogScreenContext)
-                .setTitle(R.string.game_menu_test_patterns)
-                .setItems(items, (d, which) -> copyToClipboard(rows[which][1]))
-                .setNegativeButton(R.string.game_menu_cancel, null)
-                .show();
-    }
-
-    private void copyToClipboard(String url) {
-        ClipboardManager cm = (ClipboardManager) game.getSystemService(Context.CLIPBOARD_SERVICE);
-        if (cm != null) {
-            cm.setPrimaryClip(ClipData.newPlainText("url", url));
-        }
-        Toast.makeText(game, R.string.test_patterns_copied, Toast.LENGTH_SHORT).show();
     }
 
     @Override

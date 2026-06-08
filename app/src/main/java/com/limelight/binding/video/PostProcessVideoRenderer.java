@@ -45,10 +45,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
     private int textureId;
     private int sourceTexture2d;
     private int sourceFramebuffer;
-    private int captureFramebuffer;
-    private int captureTexture;
-    private int captureFboWidth;
-    private int captureFboHeight;
     private FloatBuffer quadVertexBuffer;
     private FloatBuffer texCoordBuffer;
     private final float[] surfaceTransform = new float[16];
@@ -209,134 +205,6 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
 
     public void release() {
         stop();
-    }
-
-    /** Current render surface width, in pixels. */
-    public int getRenderWidth() {
-        return surfaceWidth > 0 ? surfaceWidth : prefConfig.width;
-    }
-
-    /** Current render surface height, in pixels. */
-    public int getRenderHeight() {
-        return surfaceHeight > 0 ? surfaceHeight : prefConfig.height;
-    }
-
-    /**
-     * Synchronous GL readback of the current tonemapped frame at the
-     * requested resolution. Renders the composite shader into a dedicated
-     * capture FBO so the output is the same tonemapped image the user sees,
-     * and at the target size (no extra full-resolution allocation).
-     *
-     * <p>Returns raw RGBA bytes (bottom-left origin) or {@code null} on
-     * failure. Caller must handle Y-flip and R/B byte swap for Android
-     * {@link android.graphics.Bitmap.Config#ARGB_8888}.</p>
-     */
-    public byte[] readbackRgba8(int captureW, int captureH) {
-        if (!running || renderHandler == null) return null;
-        if (captureW <= 0 || captureH <= 0) return null;
-
-        final CountDownLatch latch = new CountDownLatch(1);
-        final byte[][] result = new byte[1][];
-        final int[] oldFramebuffer = new int[1];
-        final int[] oldViewport = new int[4];
-
-        renderHandler.post(() -> {
-            try {
-                if (!hasValidTextureFrame) {
-                    return;
-                }
-
-                GLES20.glGetIntegerv(GLES20.GL_FRAMEBUFFER_BINDING, oldFramebuffer, 0);
-                GLES20.glGetIntegerv(GLES20.GL_VIEWPORT, oldViewport, 0);
-
-                if (!ensureCaptureFbo(captureW, captureH)) {
-                    return;
-                }
-
-                // Render the composite shader into the capture FBO so we
-                // capture the tonemapped output, not the raw source frame.
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, captureFramebuffer);
-                GLES20.glViewport(0, 0, captureW, captureH);
-
-                GLES20.glClearColor(0f, 0f, 0f, 1f);
-                GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-                drawComposite(captureW, captureH);
-
-                // Read back at capture resolution — no full-size allocation.
-                ByteBuffer buf = ByteBuffer.allocateDirect(captureW * captureH * 4);
-                buf.order(ByteOrder.nativeOrder());
-                GLES20.glReadPixels(0, 0, captureW, captureH,
-                        GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buf);
-
-                byte[] pixels = new byte[captureW * captureH * 4];
-                buf.rewind();
-                buf.get(pixels);
-                result[0] = pixels;
-            } catch (Exception e) {
-                LimeLog.warning("PostProcess: readback failed: " + e);
-            } finally {
-                GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, oldFramebuffer[0]);
-                GLES20.glViewport(oldViewport[0], oldViewport[1], oldViewport[2], oldViewport[3]);
-                latch.countDown();
-            }
-        });
-
-        try {
-            if (!latch.await(500, TimeUnit.MILLISECONDS)) {
-                LimeLog.warning("PostProcess: readback timed out");
-                return null;
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        }
-
-        return result[0];
-    }
-
-    /** Create (or re-create) the capture FBO at the given size. */
-    private boolean ensureCaptureFbo(int w, int h) {
-        if (captureFramebuffer != 0 && captureFboWidth == w && captureFboHeight == h) {
-            return true;
-        }
-        if (captureFramebuffer != 0) {
-            GLES20.glDeleteFramebuffers(1, new int[]{captureFramebuffer}, 0);
-            captureFramebuffer = 0;
-        }
-        if (captureTexture != 0) {
-            GLES20.glDeleteTextures(1, new int[]{captureTexture}, 0);
-            captureTexture = 0;
-        }
-        captureFboWidth = w;
-        captureFboHeight = h;
-
-        int[] tex = new int[1];
-        GLES20.glGenTextures(1, tex, 0);
-        captureTexture = tex[0];
-        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, captureTexture);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
-        GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
-        GLES20.glTexImage2D(GLES20.GL_TEXTURE_2D, 0, GLES20.GL_RGBA, w, h, 0,
-                GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, null);
-
-        int[] fbo = new int[1];
-        GLES20.glGenFramebuffers(1, fbo, 0);
-        captureFramebuffer = fbo[0];
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, captureFramebuffer);
-        GLES20.glFramebufferTexture2D(GLES20.GL_FRAMEBUFFER, GLES20.GL_COLOR_ATTACHMENT0,
-                GLES20.GL_TEXTURE_2D, captureTexture, 0);
-
-        int status = GLES20.glCheckFramebufferStatus(GLES20.GL_FRAMEBUFFER);
-        if (status != GLES20.GL_FRAMEBUFFER_COMPLETE) {
-            LimeLog.warning("PostProcess: capture FBO incomplete: 0x" + Integer.toHexString(status));
-            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-            return false;
-        }
-        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-        return true;
     }
 
     public static boolean shouldUse(
@@ -574,11 +442,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         }
     }
 
-    /**
-     * Draw the already-adapted 2D source texture through the libretro HDR
-     * composite shader. Used by both visible rendering and A/B capture, so
-     * captures cannot silently drift from what the user sees.
-     */
+    /** Draw the source texture through the libretro HDR composite shader. */
     private void drawComposite(float outputW, float outputH) {
         GLES20.glUseProgram(program);
 
@@ -643,16 +507,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 GLES20.glDeleteFramebuffers(1, new int[]{sourceFramebuffer}, 0);
                 sourceFramebuffer = 0;
             }
-            if (captureFramebuffer != 0) {
-                GLES20.glDeleteFramebuffers(1, new int[]{captureFramebuffer}, 0);
-                captureFramebuffer = 0;
-                captureFboWidth = 0;
-                captureFboHeight = 0;
-            }
-            if (captureTexture != 0) {
-                GLES20.glDeleteTextures(1, new int[]{captureTexture}, 0);
-                captureTexture = 0;
-            }
+
             if (sourceTexture2d != 0) {
                 GLES20.glDeleteTextures(1, new int[]{sourceTexture2d}, 0);
                 sourceTexture2d = 0;
@@ -692,10 +547,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // is already PQ-encoded and the EGL surface is BT.2020 PQ.
         hdrUniforms.expandGamut = clampGamut(prefConfig.videoHdrExpandGamut);
 
-        // Resolve HDR/BFI brightness from raw prefs + cadence.
-        // The resolver is the single source of truth for derived state;
-        // both the renderer and calibration UI consume it.
-        ResolvedHdrBfiBrightness resolved = HdrBfiBrightnessResolver.resolve(
+        HdrBfiBrightnessResolver.Result resolved = HdrBfiBrightnessResolver.resolve(
                 prefConfig, streamFps, displayRefreshRate);
         bfiScheduler.configure(resolved.bfiActive, resolved.darkFrames);
         hdrUniforms.brightnessNits = resolved.emittedNits;
@@ -721,10 +573,10 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 default: hdrModeName = "OFF"; break;
             }
             LimeLog.info("Libretro HDR: mode=" + hdrModeName
-                    + " hdrIntent=" + resolved.hdrIntent
-                    + " targetPerceivedNits=" + resolved.targetPerceivedNits
+                    + " hdrIntent=" + (prefConfig.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF)
+                    + " targetPerceivedNits=" + prefConfig.videoHdrPaperWhiteNits
                     + " emittedNits=" + resolved.emittedNits
-                    + " maxEmittedNits=" + resolved.maxEmittedNits
+                    + " maxEmittedNits=" + prefConfig.videoHdrMaxEmittedWhiteNits
                     + " dutyCycle=" + String.format("%.2f", resolved.dutyCycle)
                     + " gamut=" + hdrUniforms.expandGamut
                     + " bfi=" + bfiScheduler.isEnabled()

@@ -19,7 +19,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.PreferenceManager;
 
 import com.limelight.binding.video.HdrBfiBrightnessResolver;
-import com.limelight.binding.video.ResolvedHdrBfiBrightness;
 import com.limelight.preferences.PreferenceConfiguration;
 
 import java.util.Arrays;
@@ -221,7 +220,7 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
      * the renderer uses, so they always agree.
      */
     private void updateInfoRow() {
-        ResolvedHdrBfiBrightness r = HdrBfiBrightnessResolver.resolve(
+        HdrBfiBrightnessResolver.Result r = HdrBfiBrightnessResolver.resolve(
                 prefConfig.videoBlackFrameInsertion,
                 prefConfig.videoBfiDarkFrames,
                 prefConfig.videoHdrMode,

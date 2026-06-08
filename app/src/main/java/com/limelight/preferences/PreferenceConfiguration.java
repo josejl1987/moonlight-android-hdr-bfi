@@ -1138,8 +1138,5 @@ private static int getFramePacingValue(Context context) {
         return config;
     }
 
-    /** Write only the gamut pref, not the whole post-process config. */
-    public static void writePostProcessGamutPreference(SharedPreferences.Editor editor, int gamut) {
-        editor.putInt(VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, gamut);
-    }
+
 }

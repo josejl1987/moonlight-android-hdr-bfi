@@ -24,16 +24,12 @@ import com.limelight.binding.input.touch.TrackpadContext;
 import com.limelight.binding.input.virtual_controller.VirtualController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
-import com.limelight.binding.video.CaptureBitmapConverter;
 import com.limelight.binding.video.CrashListener;
-import com.limelight.binding.video.GamutCycle;
+import com.limelight.binding.video.LibretroHdrUniforms;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
-import com.limelight.binding.video.RenderModeResolver;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
-import com.limelight.binding.video.PostProcessAbCompareView;
 import com.limelight.binding.video.PostProcessStatusListener;
-import com.limelight.binding.video.RenderModeResolver.RenderMode;
 import com.limelight.binding.video.PostProcessVideoRenderer;
 import com.limelight.nvstream.NvConnection;
 import com.limelight.nvstream.NvConnectionListener;
@@ -76,7 +72,6 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
-import android.graphics.Bitmap;
 import android.graphics.Outline;
 import android.graphics.Point;
 import android.graphics.Rect;
@@ -248,19 +243,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     private boolean reportedCrash;
 
-    // Render mode is derived from postProcessRenderer presence + prefs.
-    // currentRenderMode() is the single source of truth — no stored field.
-
-    // A/B frame capture state (test-UX). Bitmaps are owned by this Activity
-    // and recycled in onDestroy/onStop. The capture readback downsamples to
-    // 720p to stay under the ~8 MB heap budget per REQ-3-9.
-    private static final int CAPTURE_WIDTH = 1280;
-    private static final int CAPTURE_HEIGHT = 720;
-
-
-    private Bitmap bitmapA;
-    private Bitmap bitmapB;
-    private PostProcessAbCompareView compareView;
+    private enum RenderMode { DIRECT, POSTPROCESS, POSTPROCESS_BFI }
 
     private WifiManager.WifiLock highPerfWifiLock;
     private WifiManager.WifiLock lowLatencyWifiLock;
@@ -1805,11 +1788,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
 
         releasePostProcessRenderer();
-
-        // Release A/B compare state (REQ-X-5: bitmaps recycled on lifecycle).
-        closeCompareView();
-        if (bitmapA != null) { bitmapA.recycle(); bitmapA = null; }
-        if (bitmapB != null) { bitmapB.recycle(); bitmapB = null; }
 
         // Destroy the capture provider
         inputCaptureProvider.destroy();
@@ -4040,55 +4018,41 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     /**
-     * A/B frame capture — slot A. Blocks the UI thread for up to ~2s on the
-     * readback (intentional per REQ-3-3; the caller must disable the source
-     * button before invoking). Caches the bitmap and re-enables the
-     * trigger button via a 2-second {@code Handler.postDelayed} cooldown.
-     */
-    public void captureFrameA() {
-        captureFrame(true, R.string.capture_success_a);
-    }
-
-    public void captureFrameB() {
-        captureFrame(false, R.string.capture_success_b);
-    }
-
-    private void captureFrame(boolean slotA, int successResId) {
-        Bitmap bmp = readbackCaptureBitmap();
-        if (bmp != null) {
-            if (slotA) {
-                if (bitmapA != null) bitmapA.recycle();
-                bitmapA = bmp;
-            } else {
-                if (bitmapB != null) bitmapB.recycle();
-                bitmapB = bmp;
-            }
-            Toast.makeText(this, successResId, Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    public boolean canOpenCompareView() {
-        return bitmapA != null && bitmapB != null;
-    }
-
-    /**
      * Live HDR gamut hot-toggle. Advances the gamut one step, persists the
      * pref so a future reconnect picks it up, asks the active renderer(s)
      * to apply the change, and flashes a 1-second confirmation overlay.
      */
     public void cycleGamut() {
-        int next = GamutCycle.next(prefConfig.videoHdrExpandGamut);
+        int next = nextGamut(prefConfig.videoHdrExpandGamut);
         prefConfig.videoHdrExpandGamut = next;
         SharedPreferences.Editor editor = PreferenceManager
                 .getDefaultSharedPreferences(this).edit();
-        PreferenceConfiguration.writePostProcessGamutPreference(editor, next);
+        editor.putInt(PreferenceConfiguration.VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, next);
         editor.apply();
         if (postProcessRenderer != null) {
             postProcessRenderer.updateSettings();
         }
-        flashPostProcessOverlay("Gamut: " + GamutCycle.name(next), 1000);
+        flashPostProcessOverlay("Gamut: " + gamutName(next), 1000);
+    }
+
+    private static int nextGamut(int current) {
+        switch (current) {
+            case LibretroHdrUniforms.GAMUT_ACCURATE: return LibretroHdrUniforms.GAMUT_EXPANDED;
+            case LibretroHdrUniforms.GAMUT_EXPANDED: return LibretroHdrUniforms.GAMUT_WIDE;
+            case LibretroHdrUniforms.GAMUT_WIDE:     return LibretroHdrUniforms.GAMUT_SUPER;
+            case LibretroHdrUniforms.GAMUT_SUPER:    return LibretroHdrUniforms.GAMUT_ACCURATE;
+            default: return LibretroHdrUniforms.GAMUT_ACCURATE;
+        }
+    }
+
+    private static String gamutName(int gamut) {
+        switch (gamut) {
+            case LibretroHdrUniforms.GAMUT_ACCURATE: return "Rec.709 accurate";
+            case LibretroHdrUniforms.GAMUT_EXPANDED: return "Rec.709 \u2192 P3 expansion";
+            case LibretroHdrUniforms.GAMUT_WIDE:     return "Rec.709 \u2192 BT.2020 expansion";
+            case LibretroHdrUniforms.GAMUT_SUPER:    return "Oversaturation debug";
+            default: return "Unknown";
+        }
     }
 
     /**
@@ -4150,77 +4114,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
      * per activity_game.xml) so it sits in z-order above the stream and
      * consumes touch.
      */
-    public void openCompareView() {
-        if (!canOpenCompareView() || compareView != null) {
-            return;
-        }
-        if (streamContainer == null || streamContainer.getParent() == null) {
-            return;
-        }
-        ViewGroup parent = (ViewGroup) streamContainer.getParent();
-        compareView = new PostProcessAbCompareView(
-                this, bitmapA, bitmapB);
-        parent.addView(compareView, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-    }
-
-    /**
-     * Detach and release the compare overlay. No-op if not attached.
-     */
-    public void closeCompareView() {
-        if (compareView == null) {
-            return;
-        }
-        ViewParent parent = compareView.getParent();
-        if (parent instanceof ViewGroup) {
-            ((ViewGroup) parent).removeView(compareView);
-        }
-        compareView = null;
-    }
-
-    /**
-     * Discard both A and B bitmaps, releasing native heap, and close the
-     * compare overlay if it is open. The Compare button is disabled by the
-     * caller once this returns.
-     */
-    public void clearCaptures() {
-        closeCompareView();
-        if (bitmapA != null) { bitmapA.recycle(); bitmapA = null; }
-        if (bitmapB != null) { bitmapB.recycle(); bitmapB = null; }
-    }
-
-    /**
-     * Read back a downsampled RGBA8 frame from the live post-process
-     * renderer and convert it to an ARGB_8888 {@link Bitmap}. Returns
-     * {@code null} if the renderer is not active, the readback failed, or
-     * the byte buffer is the wrong size.
-     */
-    private Bitmap readbackCaptureBitmap() {
-        if (postProcessRenderer == null) return null;
-
-        // Renderer renders the composite shader into a capture FBO at
-        // CAPTURE size — no full-resolution allocation.
-        byte[] rgba = postProcessRenderer.readbackRgba8(CAPTURE_WIDTH, CAPTURE_HEIGHT);
-        if (rgba == null) return null;
-
-        byte[] argb = CaptureBitmapConverter.rgbaBottomLeftToArgb8888TopLeft(
-                rgba, CAPTURE_WIDTH, CAPTURE_HEIGHT);
-        if (argb == null) return null;
-
-        // Build a bitmap directly at capture resolution from the corrected buffer.
-        Bitmap bmp = Bitmap.createBitmap(
-                CAPTURE_WIDTH, CAPTURE_HEIGHT, Bitmap.Config.ARGB_8888);
-        bmp.copyPixelsFromBuffer(java.nio.ByteBuffer.wrap(argb));
-        return bmp;
-    }
-
-    /**
-     * Derive the current render mode from renderer presence and prefs.
-     * This is the single source of truth — no stored mode field.
-     */
     private RenderMode currentRenderMode() {
-        return RenderModeResolver.resolve(postProcessRenderer != null, prefConfig.videoBlackFrameInsertion);
+        if (postProcessRenderer == null) return RenderMode.DIRECT;
+        return prefConfig.videoBlackFrameInsertion ? RenderMode.POSTPROCESS_BFI : RenderMode.POSTPROCESS;
     }
 
     /**
@@ -4329,10 +4225,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void onBackPressed() {
-        if (compareView != null) {
-            closeCompareView();
-            return;
-        }
         if(prefConfig.enableBackMenu){
             showGameMenu(null);
             return;
