@@ -999,6 +999,7 @@ public class StreamSettings extends AppCompatActivity {
             CheckBoxPreference bfiPref = (CheckBoxPreference) findPreference(PreferenceConfiguration.VIDEO_BFI_PREF_STRING);
 
             EditTextPreference ppWhitePref = (EditTextPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING);
+            EditTextPreference maxEmittedPref = (EditTextPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING);
             ListPreference ppGamutPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_HDR_EXPAND_GAMUT_PREF_STRING);
             ListPreference bfiDarkFramesPref = (ListPreference) findPreference(PreferenceConfiguration.VIDEO_BFI_DARK_FRAMES_PREF_STRING);
 
@@ -1014,6 +1015,7 @@ public class StreamSettings extends AppCompatActivity {
                     }
                     boolean hdrOn = on && hdrPref.getValue() != null && !"0".equals(hdrPref.getValue());
                     if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
+                    if (maxEmittedPref != null) maxEmittedPref.setEnabled(hdrOn);
                     if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
                     if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(on && bfiPref.isChecked());
                     return true;
@@ -1022,6 +1024,7 @@ public class StreamSettings extends AppCompatActivity {
                 hdrPref.setOnPreferenceChangeListener((pref, newVal) -> {
                     boolean on = !"0".equals(newVal);
                     if (ppWhitePref != null) ppWhitePref.setEnabled(on);
+                    if (maxEmittedPref != null) maxEmittedPref.setEnabled(on);
                     if (ppGamutPref != null) ppGamutPref.setEnabled(on);
                     return true;
                 });
@@ -1041,6 +1044,7 @@ public class StreamSettings extends AppCompatActivity {
                 String curHdr = hdrPref.getValue();
                 boolean hdrOn = ppOn && curHdr != null && !"0".equals(curHdr);
                 if (ppWhitePref != null) ppWhitePref.setEnabled(hdrOn);
+                if (maxEmittedPref != null) maxEmittedPref.setEnabled(hdrOn);
                 if (ppGamutPref != null) ppGamutPref.setEnabled(hdrOn);
                 if (bfiDarkFramesPref != null) bfiDarkFramesPref.setEnabled(ppOn && bfiPref.isChecked());
             }

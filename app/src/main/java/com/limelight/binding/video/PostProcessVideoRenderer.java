@@ -425,43 +425,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         } else if (hasValidTextureFrame) {
             GLES20.glClearColor(0f, 0f, 0f, 1f);
             GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
-
-            GLES20.glUseProgram(program);
-
-            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
-            GLES20.glUniform1i(uTextureLoc, 0);
-
-            if (uMvpLoc >= 0) {
-                GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, hdrUniforms.mvp, 0);
-            }
-            if (uSourceSizeLoc >= 0) {
-                GLES20.glUniform4f(uSourceSizeLoc,
-                        hdrUniforms.sourceWidth, hdrUniforms.sourceHeight,
-                        1.0f / Math.max(hdrUniforms.sourceWidth, 1.0f),
-                        1.0f / Math.max(hdrUniforms.sourceHeight, 1.0f));
-            }
-            if (uOutputSizeLoc >= 0) {
-                GLES20.glUniform4f(uOutputSizeLoc,
-                        hdrUniforms.outputWidth, hdrUniforms.outputHeight,
-                        1.0f / Math.max(hdrUniforms.outputWidth, 1.0f),
-                        1.0f / Math.max(hdrUniforms.outputHeight, 1.0f));
-            }
-            if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
-            if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
-            if (uInverseTonemapLoc >= 0) GLES20.glUniform1f(uInverseTonemapLoc, hdrUniforms.inverseTonemap);
-            if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
-            if (uHdrModeLoc >= 0) GLES20.glUniform1i(uHdrModeLoc, hdrUniforms.hdrMode);
-
-            GLES20.glEnableVertexAttribArray(aPositionLoc);
-            GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
-            GLES20.glEnableVertexAttribArray(aTexCoordLoc);
-            GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
-
-            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-
-            GLES20.glDisableVertexAttribArray(aPositionLoc);
-            GLES20.glDisableVertexAttribArray(aTexCoordLoc);
+            drawComposite(hdrUniforms.outputWidth, hdrUniforms.outputHeight);
         } else {
             if (!bfiScheduler.isEnabled()) {
                 GLES20.glClearColor(0f, 0f, 0f, 1f);
@@ -476,6 +440,50 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         if (running && !recoveryFailed) {
             choreographer.postFrameCallback(renderFrameCallback);
         }
+    }
+
+    /** Draw the source texture through the libretro HDR composite shader. */
+    private void drawComposite(float outputW, float outputH) {
+        GLES20.glUseProgram(program);
+
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, sourceTexture2d);
+        GLES20.glUniform1i(uTextureLoc, 0);
+
+        uploadCompositeUniforms(outputW, outputH);
+
+        GLES20.glEnableVertexAttribArray(aPositionLoc);
+        GLES20.glVertexAttribPointer(aPositionLoc, 2, GLES20.GL_FLOAT, false, 0, quadVertexBuffer);
+        GLES20.glEnableVertexAttribArray(aTexCoordLoc);
+        GLES20.glVertexAttribPointer(aTexCoordLoc, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+
+        GLES20.glDisableVertexAttribArray(aPositionLoc);
+        GLES20.glDisableVertexAttribArray(aTexCoordLoc);
+    }
+
+    private void uploadCompositeUniforms(float outputW, float outputH) {
+        if (uMvpLoc >= 0) {
+            GLES20.glUniformMatrix4fv(uMvpLoc, 1, false, hdrUniforms.mvp, 0);
+        }
+        if (uSourceSizeLoc >= 0) {
+            GLES20.glUniform4f(uSourceSizeLoc,
+                    hdrUniforms.sourceWidth, hdrUniforms.sourceHeight,
+                    1.0f / Math.max(hdrUniforms.sourceWidth, 1.0f),
+                    1.0f / Math.max(hdrUniforms.sourceHeight, 1.0f));
+        }
+        if (uOutputSizeLoc >= 0) {
+            GLES20.glUniform4f(uOutputSizeLoc,
+                    outputW, outputH,
+                    1.0f / Math.max(outputW, 1.0f),
+                    1.0f / Math.max(outputH, 1.0f));
+        }
+        if (uBrightnessNitsLoc >= 0) GLES20.glUniform1f(uBrightnessNitsLoc, hdrUniforms.brightnessNits);
+        if (uExpandGamutLoc >= 0) GLES20.glUniform1i(uExpandGamutLoc, hdrUniforms.expandGamut);
+        if (uInverseTonemapLoc >= 0) GLES20.glUniform1f(uInverseTonemapLoc, hdrUniforms.inverseTonemap);
+        if (uHdr10Loc >= 0) GLES20.glUniform1f(uHdr10Loc, hdrUniforms.hdr10);
+        if (uHdrModeLoc >= 0) GLES20.glUniform1i(uHdrModeLoc, hdrUniforms.hdrMode);
     }
 
     private void resetStats() {
@@ -499,6 +507,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 GLES20.glDeleteFramebuffers(1, new int[]{sourceFramebuffer}, 0);
                 sourceFramebuffer = 0;
             }
+
             if (sourceTexture2d != 0) {
                 GLES20.glDeleteTextures(1, new int[]{sourceTexture2d}, 0);
                 sourceTexture2d = 0;
@@ -536,13 +545,12 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // Host HDR streams (those that arrived over HEVC Main10 with HDR10
         // metadata) bypass the client composite entirely; the upstream frame
         // is already PQ-encoded and the EGL surface is BT.2020 PQ.
-        hdrUniforms.brightnessNits  = prefConfig.videoHdrPaperWhiteNits;
-        hdrUniforms.expandGamut     = clampGamut(prefConfig.videoHdrExpandGamut);
+        hdrUniforms.expandGamut = clampGamut(prefConfig.videoHdrExpandGamut);
 
-        int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
-        boolean bfiActive = prefConfig.videoBlackFrameInsertion
-                && BfiScheduler.canEnable(streamFps, displayRefreshRate, darkFrames);
-        bfiScheduler.configure(bfiActive, darkFrames);
+        HdrBfiBrightnessResolver.Result resolved = HdrBfiBrightnessResolver.resolve(
+                prefConfig, streamFps, displayRefreshRate);
+        bfiScheduler.configure(resolved.bfiActive, resolved.darkFrames);
+        hdrUniforms.brightnessNits = resolved.emittedNits;
 
         String reconnectMessage = null;
         if (logChanges && eglContext != null) {
@@ -565,7 +573,11 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 default: hdrModeName = "OFF"; break;
             }
             LimeLog.info("Libretro HDR: mode=" + hdrModeName
-                    + " brightness=" + (int) hdrUniforms.brightnessNits
+                    + " hdrIntent=" + (prefConfig.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF)
+                    + " targetPerceivedNits=" + prefConfig.videoHdrPaperWhiteNits
+                    + " emittedNits=" + resolved.emittedNits
+                    + " maxEmittedNits=" + prefConfig.videoHdrMaxEmittedWhiteNits
+                    + " dutyCycle=" + String.format("%.2f", resolved.dutyCycle)
                     + " gamut=" + hdrUniforms.expandGamut
                     + " bfi=" + bfiScheduler.isEnabled()
                     + " darkFrames=" + bfiScheduler.getDarkFrames());

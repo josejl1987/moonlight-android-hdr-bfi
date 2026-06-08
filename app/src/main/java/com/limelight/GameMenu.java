@@ -51,7 +51,9 @@ public class GameMenu implements Game.GameMenuCallbacks {
         }
 
         public MenuOption(String label, Runnable runnable) {
-            this(label, false, runnable);
+            this.label = label;
+            this.withGameFocus = false;
+            this.runnable = runnable;
         }
     }
 
@@ -118,6 +120,7 @@ public class GameMenu implements Game.GameMenuCallbacks {
             String label = actions.getItem(which);
             for (MenuOption option : options) {
                 if (label != null && label.equals(option.label)) {
+                    dialog.dismiss();
                     run(option);
                     break;
                 }
@@ -237,6 +240,10 @@ public class GameMenu implements Game.GameMenuCallbacks {
                 Toast.makeText(game,getString(R.string.wrong_import_format),Toast.LENGTH_SHORT).show();
             }
         }
+
+        options.add(new MenuOption(getString(R.string.game_menu_cycle_gamut),
+                true, () -> game.cycleGamut()));
+
         options.add(new MenuOption(getString(R.string.game_menu_cancel), null));
 
         showMenuDialog(getString(R.string.game_menu_send_keys), options.toArray(new MenuOption[options.size()]));
@@ -247,7 +254,7 @@ public class GameMenu implements Game.GameMenuCallbacks {
         if (game.allowChangeMouseMode) {
             options.add(new MenuOption(getString(R.string.game_menu_select_mouse_mode), true, () -> game.selectMouseMode(dialogScreenContext)));
         }
-        
+
         options.add(new MenuOption(getString(R.string.game_menu_toggle_hud), true, game::toggleHUD));
         options.add(new MenuOption(getString(R.string.game_menu_toggle_floating_button), true, game::toggleFloatingButtonVisibility));
         options.add(new MenuOption(getString(R.string.game_menu_toggle_keyboard_model), true, game::toggleKeyboardController));
@@ -255,7 +262,10 @@ public class GameMenu implements Game.GameMenuCallbacks {
             options.add(new MenuOption(getString(R.string.game_menu_toggle_virtual_model), true, game::toggleVirtualController));
         }
         options.add(new MenuOption(getString(R.string.game_menu_toggle_virtual_keyboard_model), true, game::toggleFullKeyboard));
+        options.add(new MenuOption(getString(R.string.game_menu_hdr_controls), true, () -> game.showHdrControlsOverlay()));
+        options.add(new MenuOption(getString(R.string.game_menu_toggle_bfi), true, game::cycleRenderMode));
         options.add(new MenuOption(getString(R.string.game_menu_task_manager), true, () -> sendKeys(new short[]{KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_ESCAPE})));
+
 
         // **FIXED:** This is a UI navigation action, so it should not use withGameFocus.
         options.add(new MenuOption(getString(R.string.game_menu_send_keys), () -> {

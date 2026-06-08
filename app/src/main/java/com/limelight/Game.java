@@ -25,6 +25,7 @@ import com.limelight.binding.input.virtual_controller.VirtualController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardController;
 import com.limelight.binding.input.virtual_controller.keyboard.KeyBoardLayoutController;
 import com.limelight.binding.video.CrashListener;
+import com.limelight.binding.video.LibretroHdrUniforms;
 import com.limelight.binding.video.MediaCodecDecoderRenderer;
 import com.limelight.binding.video.MediaCodecHelper;
 import com.limelight.binding.video.PerfOverlayListener;
@@ -184,6 +185,10 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private int displayWidth;
     private int displayHeight;
     private int currentOrientation;
+    // Display refresh rate captured at stream start, reused by the live
+    // Live BFI toggle can build a fresh PostProcessVideoRenderer
+    // without re-running prepareDisplayForRendering().
+    private float currentDisplayRefreshRate;
 
     public NvConnection conn;
     private SpinnerDialog spinner;
@@ -226,6 +231,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private boolean overlayToggleZoomButtonShown;
     private TextView notificationOverlayView;
     private int requestedNotificationOverlayVisibility = View.GONE;
+    private TextView postProcessFlashOverlayView;
     private View performanceOverlayView;
 
     private TextView performanceOverlayLite;
@@ -236,6 +242,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     private PostProcessVideoRenderer postProcessRenderer;
 
     private boolean reportedCrash;
+
+    private enum RenderMode { DIRECT, POSTPROCESS, POSTPROCESS_BFI }
 
     private WifiManager.WifiLock highPerfWifiLock;
     private WifiManager.WifiLock lowLatencyWifiLock;
@@ -286,6 +294,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     private ViewParent rootView;
     private ClipboardManager clipboardManager;
+
+    // HDR / BFI / gamut live controls overlay (replaces PaperWhiteCalibrationActivity).
+    private HdrControlsOverlay hdrControlsOverlay;
     private boolean clipboardSyncRunning = false;
 
     private NvHTTP httpConn;
@@ -294,6 +305,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         void showMenu(GameInputDevice devic);
         void hideMenu();
         boolean isMenuOpen();
+    }
+
+    // Package-private accessors for HdrControlsOverlay — avoids leaking the
+    // private fields while keeping the overlay in the same package.
+    PreferenceConfiguration getPrefConfigForOverlay() {
+        return prefConfig;
+    }
+
+    float getCurrentDisplayRefreshRateForOverlay() {
+        return currentDisplayRefreshRate;
     }
 
     public GameMenuCallbacks gameMenuCallbacks;
@@ -469,6 +490,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         rootView = streamContainer.getParent();
 
+        // HDR / BFI live controls overlay — sibling of streamContainer inside
+        // rootView. Starts GONE; opened via showHdrControlsOverlay().
+        if (rootView instanceof android.widget.FrameLayout) {
+            hdrControlsOverlay = new HdrControlsOverlay(this);
+            ((android.widget.FrameLayout) rootView).addView(hdrControlsOverlay,
+                    new android.widget.FrameLayout.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+
         //串流画面 顶部居中显示
         if(prefConfig.alignDisplayTopCenter){
             FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) streamContainer.getLayoutParams();
@@ -521,6 +552,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         notificationOverlayView = findViewById(R.id.notificationOverlay);
 
+        // Separate TextView for transient flash messages (e.g. gamut cycle
+        // confirmation). Lives next to postProcessOverlay but is NOT updated
+        // by the renderer's regular status publish, so the flash text survives.
+        postProcessFlashOverlayView = findViewById(R.id.postProcessFlashOverlay);
+        if (postProcessFlashOverlayView != null) {
+            postProcessFlashOverlayView.setVisibility(View.GONE);
+        }
 
         performanceOverlayView = findViewById(R.id.performanceOverlay);
 
@@ -753,6 +791,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Set to the optimal mode for streaming
         float displayRefreshRate = prepareDisplayForRendering(currentDisplay);
+        currentDisplayRefreshRate = displayRefreshRate;
         LimeLog.info("Display refresh rate: "+displayRefreshRate);
 
         // If the user requested frame pacing using a capped FPS, we will need to change our
@@ -4000,6 +4039,199 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     }
 
+    /**
+     * Live HDR gamut hot-toggle. Advances the gamut one step, persists the
+     * pref so a future reconnect picks it up, asks the active renderer(s)
+     * to apply the change, and flashes a 1-second confirmation overlay.
+     */
+    public void cycleGamut() {
+        int next = nextGamut(prefConfig.videoHdrExpandGamut);
+        prefConfig.videoHdrExpandGamut = next;
+        SharedPreferences.Editor editor = PreferenceManager
+                .getDefaultSharedPreferences(this).edit();
+        editor.putInt(PreferenceConfiguration.VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, next);
+        editor.apply();
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings();
+        }
+        flashPostProcessOverlay("Gamut: " + gamutName(next), 1000);
+    }
+
+    private static int nextGamut(int current) {
+        switch (current) {
+            case LibretroHdrUniforms.GAMUT_ACCURATE: return LibretroHdrUniforms.GAMUT_EXPANDED;
+            case LibretroHdrUniforms.GAMUT_EXPANDED: return LibretroHdrUniforms.GAMUT_WIDE;
+            case LibretroHdrUniforms.GAMUT_WIDE:     return LibretroHdrUniforms.GAMUT_SUPER;
+            case LibretroHdrUniforms.GAMUT_SUPER:    return LibretroHdrUniforms.GAMUT_ACCURATE;
+            default: return LibretroHdrUniforms.GAMUT_ACCURATE;
+        }
+    }
+
+    private static String gamutName(int gamut) {
+        switch (gamut) {
+            case LibretroHdrUniforms.GAMUT_ACCURATE: return "Rec.709 accurate";
+            case LibretroHdrUniforms.GAMUT_EXPANDED: return "Rec.709 \u2192 P3 expansion";
+            case LibretroHdrUniforms.GAMUT_WIDE:     return "Rec.709 \u2192 BT.2020 expansion";
+            case LibretroHdrUniforms.GAMUT_SUPER:    return "Oversaturation debug";
+            default: return "Unknown";
+        }
+    }
+
+    /**
+     * Push both HDR brightness values into the live renderer's in-memory
+     * config and trigger a shader uniform update. The values are persisted
+     * to prefs by the caller (usually on stop/done).
+     */
+    public void applyHdrBrightnessLive(int targetPerceivedNits, int maxEmittedNits) {
+        prefConfig.videoHdrPaperWhiteNits = targetPerceivedNits;
+        prefConfig.videoHdrMaxEmittedWhiteNits = maxEmittedNits;
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings();
+        }
+    }
+
+    /**
+     * Show the in-game transparent HDR / BFI / gamut / paper-white / clamp
+     * overlay. Replaces the deleted {@code PaperWhiteCalibrationActivity} so
+     * the user can see the live stream while adjusting. Safe to call from
+     * the UI thread; the overlay is a child of the same parent as
+     * {@code streamContainer}.
+     */
+    public void showHdrControlsOverlay() {
+        if (hdrControlsOverlay == null) {
+            return;
+        }
+        hdrControlsOverlay.show();
+    }
+
+    /**
+     * Hide the HDR controls overlay and persist slider values to
+     * {@link SharedPreferences}. Stream input is restored immediately.
+     */
+    public void hideHdrControlsOverlay() {
+        if (hdrControlsOverlay == null) {
+            return;
+        }
+        hdrControlsOverlay.hide();
+    }
+
+    /**
+     * Force a full stream reconnect, preserving the launch intent extras.
+     * Used by {@link HdrControlsOverlay#cycleHdrMode()} when the HDR output
+     * mode changes — the EGL surface + shader chain must be recreated.
+     */
+    public void reconnectStream() {
+        Intent intent = new Intent(getIntent());
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        startActivity(intent);
+        finish();
+    }
+
+    /**
+     * Show a transient text overlay for {@code durationMs}. Uses a
+     * dedicated TextView so the regular status publish (every 60 frames)
+     * does not clobber the flash text. Repeated calls cancel the previous
+     * pending hide.
+     */
+    public void flashPostProcessOverlay(String text, int durationMs) {
+        if (postProcessFlashOverlayView == null) {
+            return;
+        }
+        // Cancel any previously scheduled hide so the new flash gets a
+        // full window.
+        postProcessFlashOverlayView.removeCallbacks(flashClearRunnable);
+        postProcessFlashOverlayView.setText(text);
+        postProcessFlashOverlayView.setVisibility(View.VISIBLE);
+        postProcessFlashOverlayView.postDelayed(flashClearRunnable, durationMs);
+    }
+
+    private final Runnable flashClearRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (postProcessFlashOverlayView != null) {
+                postProcessFlashOverlayView.setVisibility(View.GONE);
+                postProcessFlashOverlayView.setText("");
+            }
+        }
+    };
+
+    private RenderMode currentRenderMode() {
+        if (postProcessRenderer == null) return RenderMode.DIRECT;
+        return prefConfig.videoBlackFrameInsertion ? RenderMode.POSTPROCESS_BFI : RenderMode.POSTPROCESS;
+    }
+
+    /**
+     * Cycle the active render mode: DIRECT → POSTPROCESS →
+     * POSTPROCESS_BFI → DIRECT. The whole sequence runs on the UI thread
+     * (the existing startBlocking()/stop() contracts block for up to 2s
+     * each) and is wrapped in a {@link SpinnerDialog} so the user has
+     * feedback.
+     *
+     * <p>BFI mode is derived from the renderer + pref — there is no
+     * separate state field (DRY / single source of truth).</p>
+     */
+    public void cycleRenderMode() {
+        // Wrapped in try/finally so the spinner always closes, even if a
+        // renderer init throws. See discovery-bfi-toggle-blocks.
+        SpinnerDialog.displayDialog(this,
+                getString(R.string.bfi_toggle_title),
+                getString(R.string.bfi_toggle_msg),
+                true);
+        try {
+            switch (currentRenderMode()) {
+                case DIRECT:
+                    // Build the post-process renderer, BFI initially off.
+                    prefConfig.videoBlackFrameInsertion = false;
+                    Surface renderSurface = streamContainer.getSurface();
+                    postProcessRenderer = new PostProcessVideoRenderer(
+                            this,
+                            renderSurface,
+                            prefConfig,
+                            prefConfig.fps,
+                            currentDisplayRefreshRate,
+                            false, // hostHdrStreamActive — re-evaluated by decide()
+                            this
+                    );
+                    if (postProcessRenderer.startBlocking()) {
+                        decoderRenderer.setRenderTarget(postProcessRenderer.getCodecSurface());
+                    } else {
+                        postProcessRenderer.release();
+                        postProcessRenderer = null;
+                        decoderRenderer.setRenderTarget(streamContainer.getSurface());
+                    }
+                    break;
+
+                case POSTPROCESS:
+                    // Enable BFI on the already-active post-process renderer.
+                    prefConfig.videoBlackFrameInsertion = true;
+                    SharedPreferences.Editor bfiEditor = PreferenceManager
+                            .getDefaultSharedPreferences(this).edit();
+                    bfiEditor.putBoolean(PreferenceConfiguration.VIDEO_BFI_PREF_STRING, true);
+                    bfiEditor.apply();
+                    postProcessRenderer.updateSettings();
+                    break;
+
+                case POSTPROCESS_BFI:
+                    // Tear down post-process renderer, go direct.
+                    // Clear BFI state so the pref does not stay stale.
+                    prefConfig.videoBlackFrameInsertion = false;
+                    SharedPreferences.Editor bfiOff = PreferenceManager
+                            .getDefaultSharedPreferences(this).edit();
+                    bfiOff.putBoolean(
+                            PreferenceConfiguration.VIDEO_BFI_PREF_STRING, false);
+                    bfiOff.apply();
+                    postProcessRenderer.release();
+                    postProcessRenderer = null;
+                    decoderRenderer.setRenderTarget(streamContainer.getSurface());
+                    break;
+            }
+        } catch (Throwable t) {
+            LimeLog.warning("Render mode toggle failed: " + t);
+        } finally {
+            SpinnerDialog.closeDialogs(this);
+        }
+    }
+
     @Override
     public void onUsbPermissionPromptStarting() {
         // Disable PiP auto-enter while the USB permission prompt is on-screen. This prevents
@@ -4030,6 +4262,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void onBackPressed() {
+        // First back press: dismiss the HDR controls overlay if it's open
+        // (and persist the slider values). Second press: fall through to
+        // the default back behavior.
+        if (hdrControlsOverlay != null && hdrControlsOverlay.isOverlayVisible()) {
+            hideHdrControlsOverlay();
+            return;
+        }
         if(prefConfig.enableBackMenu){
             showGameMenu(null);
             return;

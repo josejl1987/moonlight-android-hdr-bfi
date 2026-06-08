@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.view.Display;
 
+import com.limelight.binding.video.BfiScheduler;
 import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.profiles.ProfilesManager;
 
@@ -117,6 +118,7 @@ public class PreferenceConfiguration {
     public static final String VIDEO_HDR_EXPAND_GAMUT_PREF_STRING = "list_video_hdr_expand_gamut";
     public static final String VIDEO_BFI_PREF_STRING = "checkbox_video_bfi";
     public static final String VIDEO_BFI_DARK_FRAMES_PREF_STRING = "list_video_bfi_dark_frames";
+    public static final String VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING = "list_video_hdr_max_emitted_nits";
     private static final String CHECKBOX_ENABLE_QUIT_DIALOG = "checkbox_enable_quit_dialog";
 
     private static final String CHECKBOX_ENABLE_FLOATING_BUTTON = "checkbox_enable_floating_button";
@@ -217,10 +219,15 @@ public class PreferenceConfiguration {
 
     private static final String DEFAULT_POST_PROCESS_RENDERER = "0";
     private static final String DEFAULT_VIDEO_HDR_MODE = "0";
+    // String-valued defaults for SharedPreferences.  Keep in sync with the
+    // int DEFAULT constants above — Android's SharedPreferences stores strings
+    // for EditTextPreference, so we need string literals (not valueOf, which
+    // is not a JLS compile-time constant expression).
     private static final String DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS = "200";
     private static final String DEFAULT_VIDEO_HDR_EXPAND_GAMUT = "0";
     private static final boolean DEFAULT_VIDEO_BFI = false;
     private static final String DEFAULT_VIDEO_BFI_DARK_FRAMES = "1";
+    private static final String DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS = "1000";
     private static final boolean DEFAULT_REMEMBER_ZOOM_PAN = false;
     private static final float DEFAULT_ZOOM_SCALE = 1.0f;
     private static final float DEFAULT_PAN_OFFSET = 0.0f;
@@ -238,6 +245,30 @@ public class PreferenceConfiguration {
     public static final int HDR_GAMUT_EXPANDED = 1;  // Expanded709 -> Rec.2020
     public static final int HDR_GAMUT_WIDE = 2;      // P3 -> Rec.2020
     public static final int HDR_GAMUT_SUPER = 3;      // passthrough (max boost)
+
+    // HDR paper-white calibration range and defaults — single source of truth
+    // for PreferenceConfiguration clamps and HdrControlsOverlay sliders.
+    public static final int HDR_PAPER_WHITE_DEFAULT = 200;
+    public static final int HDR_PAPER_WHITE_MIN = 50;
+    public static final int HDR_PAPER_WHITE_MAX = 1000;
+    public static final int HDR_PAPER_WHITE_STEP = 25;
+
+    public static final int HDR_MAX_EMITTED_DEFAULT = 1000;
+    public static final int HDR_MAX_EMITTED_MIN = 80;
+    public static final int HDR_MAX_EMITTED_MAX = 2000;
+    public static final int HDR_MAX_EMITTED_STEP = 50;
+
+    /**
+     * Sanitize a user-supplied max-emitted-nits value: clamp to the valid
+     * range and ensure it is at least {@code targetPerceivedNits}.
+     * <p>Call this in both preference loading and live slider state so
+     * the policy (max ≥ target) is consistent everywhere.</p>
+     */
+    public static int sanitizeHdrMaxEmittedNits(int maxEmitted, int targetPerceivedNits) {
+        int clamped = Math.max(HDR_MAX_EMITTED_MIN,
+                Math.min(maxEmitted, HDR_MAX_EMITTED_MAX));
+        return Math.max(clamped, targetPerceivedNits);
+    }
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -296,6 +327,7 @@ public class PreferenceConfiguration {
     public int videoHdrExpandGamut;
     public boolean videoBlackFrameInsertion;
     public int videoBfiDarkFrames;
+    public int videoHdrMaxEmittedWhiteNits;
 
     public float parallax_depth;
 
@@ -1061,16 +1093,23 @@ private static int getFramePacingValue(Context context) {
             config.videoHdrMode = VIDEO_HDR_OFF;
         }
         config.videoHdrPaperWhiteNits = getIntPref(prefs, VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS);
+        if (config.videoHdrPaperWhiteNits < HDR_PAPER_WHITE_MIN) {
+            config.videoHdrPaperWhiteNits = HDR_PAPER_WHITE_MIN;
+        }
+        if (config.videoHdrPaperWhiteNits > HDR_PAPER_WHITE_MAX) {
+            config.videoHdrPaperWhiteNits = HDR_PAPER_WHITE_MAX;
+        }
         config.videoHdrExpandGamut = getIntPref(prefs, VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT);
         if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_SUPER) {
             config.videoHdrExpandGamut = HDR_GAMUT_ACCURATE;
         }
         config.videoBlackFrameInsertion = prefs.getBoolean(VIDEO_BFI_PREF_STRING, DEFAULT_VIDEO_BFI);
-        config.videoBfiDarkFrames = getIntPref(prefs, VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES);
-        if (config.videoBfiDarkFrames < 1) {
-            config.videoBfiDarkFrames = 1;
-        }
-
+        config.videoBfiDarkFrames = BfiScheduler.sanitizeDarkFrames(
+                getIntPref(prefs, VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES));
+        config.videoHdrMaxEmittedWhiteNits = sanitizeHdrMaxEmittedNits(
+                getIntPref(prefs, VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING,
+                        DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS),
+                config.videoHdrPaperWhiteNits);
 
         config.enableAudioFx = prefs.getBoolean(ENABLE_AUDIO_FX_PREF_STRING, DEFAULT_ENABLE_AUDIO_FX);
         config.reduceRefreshRate = prefs.getBoolean(REDUCE_REFRESH_RATE_PREF_STRING, DEFAULT_REDUCE_REFRESH_RATE);
@@ -1098,4 +1137,6 @@ private static int getFramePacingValue(Context context) {
 
         return config;
     }
+
+
 }

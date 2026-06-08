@@ -235,7 +235,6 @@
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
 
-
         <activity android:name=".DebugInfoActivity"
             android:launchMode="singleTask"/>
 

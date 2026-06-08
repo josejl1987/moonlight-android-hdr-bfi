@@ -50,6 +50,25 @@
         android:preferKeepClear="true"
         android:visibility="gone" />
 
+    <TextView
+        android:id="@+id/postProcessFlashOverlay"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginRight="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginTop="96dp"
+        android:layout_gravity="top|end"
+        android:textAppearance="?android:attr/textAppearanceMedium"
+        android:gravity="end"
+        android:background="#80000000"
+        android:paddingLeft="10dp"
+        android:paddingRight="10dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:preferKeepClear="true"
+        android:visibility="gone"
+        android:textColor="#ffffffff" />
+
     <LinearLayout
         android:id="@+id/performanceOverlay"
         android:orientation="vertical"
