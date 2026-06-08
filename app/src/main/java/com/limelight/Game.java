@@ -4143,6 +4143,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
      */
     public void launchPaperWhiteCalibration() {
         Intent intent = new Intent(this, PaperWhiteCalibrationActivity.class);
+        intent.putExtra(PaperWhiteCalibrationActivity.EXTRA_STREAM_FPS, prefConfig.fps);
+        intent.putExtra(PaperWhiteCalibrationActivity.EXTRA_DISPLAY_HZ, currentDisplayRefreshRate);
         startActivity(intent);
     }
 

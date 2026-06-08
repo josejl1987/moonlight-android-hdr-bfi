@@ -1064,6 +1064,12 @@ private static int getFramePacingValue(Context context) {
             config.videoHdrMode = VIDEO_HDR_OFF;
         }
         config.videoHdrPaperWhiteNits = getIntPref(prefs, VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS);
+        if (config.videoHdrPaperWhiteNits < 50) {
+            config.videoHdrPaperWhiteNits = 50;
+        }
+        if (config.videoHdrPaperWhiteNits > 1000) {
+            config.videoHdrPaperWhiteNits = 1000;
+        }
         config.videoHdrExpandGamut = getIntPref(prefs, VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT);
         if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_SUPER) {
             config.videoHdrExpandGamut = HDR_GAMUT_ACCURATE;
@@ -1076,6 +1082,14 @@ private static int getFramePacingValue(Context context) {
         config.videoHdrMaxEmittedWhiteNits = getIntPref(prefs, VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS);
         if (config.videoHdrMaxEmittedWhiteNits < 80) {
             config.videoHdrMaxEmittedWhiteNits = 80;
+        }
+        if (config.videoHdrMaxEmittedWhiteNits > 2000) {
+            config.videoHdrMaxEmittedWhiteNits = 2000;
+        }
+        // Emitted clamp must be at least as high as the target perceived white.
+        // Without this, compensation would always be clamped below the target.
+        if (config.videoHdrMaxEmittedWhiteNits < config.videoHdrPaperWhiteNits) {
+            config.videoHdrMaxEmittedWhiteNits = config.videoHdrPaperWhiteNits;
         }
 
         config.enableAudioFx = prefs.getBoolean(ENABLE_AUDIO_FX_PREF_STRING, DEFAULT_ENABLE_AUDIO_FX);

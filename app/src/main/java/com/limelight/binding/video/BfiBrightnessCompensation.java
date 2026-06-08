@@ -64,8 +64,8 @@ public final class BfiBrightnessCompensation {
      * @param bfiEnabled               whether BFI is active
      * @param visibleSlots             number of visible output-refresh slots (≥&nbsp;1)
      * @param totalSlots               total output-refresh slots per source frame
-     * @param maxEmittedWhiteNits      safety clamp (nits, ≥&nbsp;targetPerceivedWhiteNits)
-     * @return emitted white nits for the visible frame, ∈&nbsp;[target, maxEmittedWhiteNits]
+     * @param maxEmittedWhiteNits      safety clamp (nits, should be ≥&nbsp;targetPerceivedWhiteNits)
+     * @return emitted white nits for the visible frame, ∈&nbsp;[0, maxEmittedWhiteNits]
      */
     public static int emittedWhiteNits(
             int targetPerceivedWhiteNits,

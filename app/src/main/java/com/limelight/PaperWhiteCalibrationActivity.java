@@ -1,5 +1,6 @@
 package com.limelight;
 
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.os.Build;
@@ -19,6 +20,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.PreferenceManager;
 
 import com.limelight.binding.video.BfiBrightnessCompensation;
+import com.limelight.binding.video.BfiScheduler;
 import com.limelight.preferences.PreferenceConfiguration;
 
 import java.util.Arrays;
@@ -45,6 +47,10 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     private static final String STATE_PERCEIVED = "perceived_nits";
     private static final String STATE_MAX_EMITTED = "max_emitted_nits";
 
+    /** Optional extras passed from Game for accurate BFI viability check. */
+    static final String EXTRA_STREAM_FPS = "streamFps";
+    static final String EXTRA_DISPLAY_HZ = "displayHz";
+
     /** Perceived white range. */
     private static final int MIN_PERCEIVED_NITS = 50;
     private static final int MAX_PERCEIVED_NITS = 1000;
@@ -58,6 +64,10 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     private static final int DEFAULT_MAX_EMITTED = 1000;
 
     private PreferenceConfiguration prefConfig;
+
+    // Stream/display params for BFI viability (0 = unknown)
+    private float streamFps;
+    private float displayHz;
 
     // Perceived white controls
     private SeekBar perceivedSeek;
@@ -78,6 +88,10 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
         logDisplayHdrCapabilities();
 
         prefConfig = PreferenceConfiguration.readPreferences(this);
+
+        Intent intent = getIntent();
+        streamFps = intent.getFloatExtra(EXTRA_STREAM_FPS, 0f);
+        displayHz = intent.getFloatExtra(EXTRA_DISPLAY_HZ, 0f);
 
         pendingPerceivedNits = (savedInstanceState != null)
                 ? savedInstanceState.getInt(STATE_PERCEIVED, prefConfig.videoHdrPaperWhiteNits)
@@ -246,17 +260,40 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
 
     /**
      * Update the info row showing BFI duty cycle and compensated emitted nits.
+     *
+     * <p>When stream/display params are available (passed from Game), the
+     * info row checks {@link BfiScheduler#canEnable} so it only advertises
+     * BFI compensation when it will actually activate.  Without those params
+     * it shows the configured intent with a caveat.</p>
      */
     private void updateInfoRow() {
-        boolean bfiEnabled = prefConfig.videoBlackFrameInsertion;
+        boolean bfiIntent = prefConfig.videoBlackFrameInsertion;
         int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
-        float duty = BfiBrightnessCompensation.dutyCycle(bfiEnabled, 1, 1 + darkFrames);
+
+        // Can BFI actually activate?  Only check when we have real cadence data.
+        boolean bfiActive;
+        if (streamFps > 0f && displayHz > 0f) {
+            bfiActive = bfiIntent && BfiScheduler.canEnable(streamFps, displayHz, darkFrames);
+        } else {
+            bfiActive = bfiIntent;
+        }
+
+        float duty = BfiBrightnessCompensation.dutyCycle(bfiActive, 1, 1 + darkFrames);
         int emitted = BfiBrightnessCompensation.emittedWhiteNits(
-                pendingPerceivedNits, bfiEnabled, 1, 1 + darkFrames, pendingMaxEmittedNits);
+                pendingPerceivedNits, bfiActive, 1, 1 + darkFrames, pendingMaxEmittedNits);
 
         String dutyPct = Math.round(duty * 100f) + "%";
-        String clamped = emitted >= pendingPerceivedNits / duty ? "" : " (clamped)";
-        infoText.setText("BFI duty: " + dutyPct + "  →  Emitted: " + emitted + " nits" + clamped);
+        String clamped = emitted >= pendingPerceivedNits / Math.max(duty, 0.01f) ? "" : " (clamped)";
+
+        if (!bfiActive && bfiIntent && streamFps > 0f) {
+            // BFI is configured but won't activate — display cadence mismatch.
+            infoText.setText("BFI configured (" + darkFrames + " dark frames) — "
+                    + "not active at current refresh/FPS cadence");
+        } else if (!bfiActive) {
+            infoText.setText("BFI off — emitted = " + emitted + " nits");
+        } else {
+            infoText.setText("BFI duty: " + dutyPct + "  →  Emitted: " + emitted + " nits" + clamped);
+        }
     }
 
     // ---- persistence ----

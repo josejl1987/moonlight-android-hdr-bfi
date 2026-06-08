@@ -700,15 +700,24 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // BFI brightness compensation: scale emitted nits so the perceived
         // (time-integrated) brightness equals the target paper white, even
         // when BFI inserts black intervals between visible frames.
+        //
+        // Compensation only has an effect when the shader runs in an HDR
+        // output mode (scRGB or HDR10) because the non-HDR fallthrough path
+        // ignores BrightnessNits entirely.  Guard against the HDR-off case
+        // so logs are not misleading.
         int targetPerceivedNits = prefConfig.videoHdrPaperWhiteNits;
+        boolean hdrIntent = prefConfig.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF;
         int maxEmittedNits = prefConfig.videoHdrMaxEmittedWhiteNits;
-        int emittedNits = BfiBrightnessCompensation.emittedWhiteNits(
-                targetPerceivedNits,
-                bfiActive,
-                1,                          // visibleSlots — one frame per BFI cycle
-                1 + darkFrames,             // totalSlots
-                maxEmittedNits);
-        hdrUniforms.brightnessNits = emittedNits;
+        if (hdrIntent && bfiActive) {
+            hdrUniforms.brightnessNits = BfiBrightnessCompensation.emittedWhiteNits(
+                    targetPerceivedNits,
+                    true,               // bfiEnabled
+                    1,                  // visibleSlots — one frame per BFI cycle
+                    1 + darkFrames,     // totalSlots
+                    maxEmittedNits);
+        } else {
+            hdrUniforms.brightnessNits = targetPerceivedNits;
+        }
 
         String reconnectMessage = null;
         if (logChanges && eglContext != null) {
@@ -731,6 +740,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 default: hdrModeName = "OFF"; break;
             }
             LimeLog.info("Libretro HDR: mode=" + hdrModeName
+                    + " hdrIntent=" + hdrIntent
                     + " targetPerceivedNits=" + targetPerceivedNits
                     + " emittedNits=" + (int) hdrUniforms.brightnessNits
                     + " maxEmittedNits=" + maxEmittedNits
