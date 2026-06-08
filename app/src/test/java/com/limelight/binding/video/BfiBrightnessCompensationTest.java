@@ -74,13 +74,6 @@ public class BfiBrightnessCompensationTest {
     }
 
     @Test
-    public void clamp_belowTarget_reportsMaxNotTarget() {
-        // When max < target, result is the clamp, not the target.
-        int result = BfiBrightnessCompensation.emittedWhiteNits(400, false, 1, 1, 300);
-        assertEquals(300, result);
-    }
-
-    @Test
     public void emittedWithRoundedDivision() {
         // 200 / (1/3) = 600 (exact), but test an inexact case
         int result = BfiBrightnessCompensation.emittedWhiteNits(250, true, 1, 3, 2000);

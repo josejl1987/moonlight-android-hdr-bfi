@@ -148,9 +148,13 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
             @Override
             public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
                 pendingPerceivedNits = MIN_PERCEIVED_NITS + progress * STEP_PERCEIVED;
+                // Ensure max emitted clamp stays ≥ perceived target.
+                enforceMaxNotBelowPerceived();
                 updatePerceivedReadout();
+                updateMaxEmittedReadout();
                 updateInfoRow();
                 pushToLiveRenderer();
+                pushMaxEmittedLive();
             }
             @Override public void onStartTrackingTouch(SeekBar sb) { }
             @Override public void onStopTrackingTouch(SeekBar sb) { }
@@ -196,6 +200,12 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
             @Override
             public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
                 pendingMaxEmittedNits = MIN_MAX_EMITTED + progress * STEP_MAX_EMITTED;
+                // If the user slides max below perceived, snap it back.
+                if (pendingMaxEmittedNits < pendingPerceivedNits) {
+                    pendingMaxEmittedNits = pendingPerceivedNits;
+                    int snapProgress = (pendingMaxEmittedNits - MIN_MAX_EMITTED) / STEP_MAX_EMITTED;
+                    maxEmittedSeek.setProgress(snapProgress);
+                }
                 updateMaxEmittedReadout();
                 updateInfoRow();
                 pushMaxEmittedLive();
@@ -298,7 +308,25 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
 
     // ---- persistence ----
 
+    /**
+     * Ensure {@code pendingMaxEmittedNits ≥ pendingPerceivedNits},
+     * bumping max if needed and updating its slider position.
+     */
+    private void enforceMaxNotBelowPerceived() {
+        if (pendingMaxEmittedNits < pendingPerceivedNits) {
+            pendingMaxEmittedNits = pendingPerceivedNits;
+            int prog = (pendingMaxEmittedNits - MIN_MAX_EMITTED) / STEP_MAX_EMITTED;
+            maxEmittedSeek.setProgress(prog);
+            updateMaxEmittedReadout();
+        }
+    }
+
     private void persistBoth() {
+        // Final enforcement before saving.
+        if (pendingMaxEmittedNits < pendingPerceivedNits) {
+            pendingMaxEmittedNits = pendingPerceivedNits;
+        }
+
         prefConfig.videoHdrPaperWhiteNits = pendingPerceivedNits;
         prefConfig.videoHdrMaxEmittedWhiteNits = pendingMaxEmittedNits;
 
