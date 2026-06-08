@@ -4126,6 +4126,17 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     /**
+     * Push a max-emitted-white-nits change into the live renderer's
+     * in-memory config and trigger a shader uniform update.
+     */
+    public void applyMaxEmittedNitsLive(int nits) {
+        prefConfig.videoHdrMaxEmittedWhiteNits = nits;
+        if (postProcessRenderer != null) {
+            postProcessRenderer.updateSettings();
+        }
+    }
+
+    /**
      * Launch the paper-white calibration wizard as a separate Activity.
      * The wizard persists its own pref changes and applies them live to
      * the active renderer via {@link #applyPostProcessSettingsLive()}.

@@ -117,6 +117,7 @@ public class PreferenceConfiguration {
     public static final String VIDEO_HDR_EXPAND_GAMUT_PREF_STRING = "list_video_hdr_expand_gamut";
     public static final String VIDEO_BFI_PREF_STRING = "checkbox_video_bfi";
     public static final String VIDEO_BFI_DARK_FRAMES_PREF_STRING = "list_video_bfi_dark_frames";
+    public static final String VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING = "list_video_hdr_max_emitted_nits";
     private static final String CHECKBOX_ENABLE_QUIT_DIALOG = "checkbox_enable_quit_dialog";
 
     private static final String CHECKBOX_ENABLE_FLOATING_BUTTON = "checkbox_enable_floating_button";
@@ -221,6 +222,7 @@ public class PreferenceConfiguration {
     private static final String DEFAULT_VIDEO_HDR_EXPAND_GAMUT = "0";
     private static final boolean DEFAULT_VIDEO_BFI = false;
     private static final String DEFAULT_VIDEO_BFI_DARK_FRAMES = "1";
+    private static final String DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS = "1000";
     private static final boolean DEFAULT_REMEMBER_ZOOM_PAN = false;
     private static final float DEFAULT_ZOOM_SCALE = 1.0f;
     private static final float DEFAULT_PAN_OFFSET = 0.0f;
@@ -296,6 +298,7 @@ public class PreferenceConfiguration {
     public int videoHdrExpandGamut;
     public boolean videoBlackFrameInsertion;
     public int videoBfiDarkFrames;
+    public int videoHdrMaxEmittedWhiteNits;
 
     public float parallax_depth;
 
@@ -1070,7 +1073,10 @@ private static int getFramePacingValue(Context context) {
         if (config.videoBfiDarkFrames < 1) {
             config.videoBfiDarkFrames = 1;
         }
-
+        config.videoHdrMaxEmittedWhiteNits = getIntPref(prefs, VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS);
+        if (config.videoHdrMaxEmittedWhiteNits < 80) {
+            config.videoHdrMaxEmittedWhiteNits = 80;
+        }
 
         config.enableAudioFx = prefs.getBoolean(ENABLE_AUDIO_FX_PREF_STRING, DEFAULT_ENABLE_AUDIO_FX);
         config.reduceRefreshRate = prefs.getBoolean(REDUCE_REFRESH_RATE_PREF_STRING, DEFAULT_REDUCE_REFRESH_RATE);

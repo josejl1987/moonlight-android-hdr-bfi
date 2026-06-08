@@ -744,6 +744,8 @@
     <string name="video_hdr_scrgb">scRGB (FP16)</string>
     <string name="title_video_hdr_paper_white">HDR paper white</string>
     <string name="summary_video_hdr_paper_white">Paper white in nits for the HDR shader. RetroArch default is 200 nits.</string>
+    <string name="title_video_hdr_max_emitted">Max emitted HDR clamp</string>
+    <string name="summary_video_hdr_max_emitted">Safety ceiling for BFI brightness boost in nits. Prevents overdriving the display.</string>
     <string name="title_video_hdr_expand_gamut">Gamut expansion</string>
     <string name="summary_video_hdr_expand_gamut">Expand gamut when post-processing HDR</string>
     <string name="video_hdr_gamut_accurate">Accurate</string>
@@ -772,7 +774,7 @@
     <string name="game_menu_calibrate_paper_white">Calibrate paper white</string>
     <string name="paper_white_title">Paper white calibration</string>
     <string name="paper_white_done">Done</string>
-    <string name="paper_white_reset">Reset to 200</string>
+    <string name="paper_white_reset">Reset defaults</string>
 
     <!-- Test UX: test patterns submenu (Commit 5) -->
     <string name="game_menu_test_patterns">Test patterns</string>

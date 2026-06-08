@@ -690,13 +690,25 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // Host HDR streams (those that arrived over HEVC Main10 with HDR10
         // metadata) bypass the client composite entirely; the upstream frame
         // is already PQ-encoded and the EGL surface is BT.2020 PQ.
-        hdrUniforms.brightnessNits  = prefConfig.videoHdrPaperWhiteNits;
-        hdrUniforms.expandGamut     = clampGamut(prefConfig.videoHdrExpandGamut);
+        hdrUniforms.expandGamut = clampGamut(prefConfig.videoHdrExpandGamut);
 
         int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
         boolean bfiActive = prefConfig.videoBlackFrameInsertion
                 && BfiScheduler.canEnable(streamFps, displayRefreshRate, darkFrames);
         bfiScheduler.configure(bfiActive, darkFrames);
+
+        // BFI brightness compensation: scale emitted nits so the perceived
+        // (time-integrated) brightness equals the target paper white, even
+        // when BFI inserts black intervals between visible frames.
+        int targetPerceivedNits = prefConfig.videoHdrPaperWhiteNits;
+        int maxEmittedNits = prefConfig.videoHdrMaxEmittedWhiteNits;
+        int emittedNits = BfiBrightnessCompensation.emittedWhiteNits(
+                targetPerceivedNits,
+                bfiActive,
+                1,                          // visibleSlots — one frame per BFI cycle
+                1 + darkFrames,             // totalSlots
+                maxEmittedNits);
+        hdrUniforms.brightnessNits = emittedNits;
 
         String reconnectMessage = null;
         if (logChanges && eglContext != null) {
@@ -719,7 +731,9 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
                 default: hdrModeName = "OFF"; break;
             }
             LimeLog.info("Libretro HDR: mode=" + hdrModeName
-                    + " brightness=" + (int) hdrUniforms.brightnessNits
+                    + " targetPerceivedNits=" + targetPerceivedNits
+                    + " emittedNits=" + (int) hdrUniforms.brightnessNits
+                    + " maxEmittedNits=" + maxEmittedNits
                     + " gamut=" + hdrUniforms.expandGamut
                     + " bfi=" + bfiScheduler.isEnabled()
                     + " darkFrames=" + bfiScheduler.getDarkFrames());

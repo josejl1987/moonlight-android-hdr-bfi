@@ -247,6 +247,13 @@
             android:summary="@string/summary_video_hdr_paper_white"
             android:title="@string/title_video_hdr_paper_white"
             app:iconSpaceReserved="false" />
+        <EditTextPreference
+            android:defaultValue="1000"
+            android:inputType="number"
+            android:key="list_video_hdr_max_emitted_nits"
+            android:summary="@string/summary_video_hdr_max_emitted"
+            android:title="@string/title_video_hdr_max_emitted"
+            app:iconSpaceReserved="false" />
         <ListPreference
             android:defaultValue="0"
             android:entries="@array/video_hdr_expand_gamut_names"
