@@ -19,8 +19,8 @@ import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.PreferenceManager;
 
-import com.limelight.binding.video.BfiBrightnessCompensation;
-import com.limelight.binding.video.BfiScheduler;
+import com.limelight.binding.video.HdrBfiBrightnessResolver;
+import com.limelight.binding.video.ResolvedHdrBfiBrightness;
 import com.limelight.preferences.PreferenceConfiguration;
 
 import java.util.Arrays;
@@ -55,13 +55,13 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     private static final int MIN_PERCEIVED_NITS = PreferenceConfiguration.HDR_PAPER_WHITE_MIN;
     private static final int MAX_PERCEIVED_NITS = PreferenceConfiguration.HDR_PAPER_WHITE_MAX;
     private static final int STEP_PERCEIVED = PreferenceConfiguration.HDR_PAPER_WHITE_STEP;
-    private static final int DEFAULT_PERCEIVED = 200;
+    private static final int DEFAULT_PERCEIVED = PreferenceConfiguration.HDR_PAPER_WHITE_DEFAULT;
 
     /** Max emitted clamp range — sourced from PreferenceConfiguration. */
     private static final int MIN_MAX_EMITTED = PreferenceConfiguration.HDR_MAX_EMITTED_MIN;
     private static final int MAX_MAX_EMITTED = PreferenceConfiguration.HDR_MAX_EMITTED_MAX;
     private static final int STEP_MAX_EMITTED = PreferenceConfiguration.HDR_MAX_EMITTED_STEP;
-    private static final int DEFAULT_MAX_EMITTED = 1000;
+    private static final int DEFAULT_MAX_EMITTED = PreferenceConfiguration.HDR_MAX_EMITTED_DEFAULT;
 
     private PreferenceConfiguration prefConfig;
 
@@ -271,38 +271,39 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     /**
      * Update the info row showing BFI duty cycle and compensated emitted nits.
      *
-     * <p>When stream/display params are available (passed from Game), the
-     * info row checks {@link BfiScheduler#canEnable} so it only advertises
-     * BFI compensation when it will actually activate.  Without those params
-     * it shows the configured intent with a caveat.</p>
+     * <p>Uses {@link HdrBfiBrightnessResolver} — the same resolver the
+     * renderer calls — so the UI and the shader always agree on duty cycle,
+     * emitted nits, and BFI active state.</p>
      */
     private void updateInfoRow() {
-        boolean bfiIntent = prefConfig.videoBlackFrameInsertion;
-        int darkFrames = BfiScheduler.sanitizeDarkFrames(prefConfig.videoBfiDarkFrames);
+        // Use the same resolver as the renderer, but with pending slider
+        // values so the user sees the live result of their adjustment.
+        // Build a temporary PreferenceConfiguration snapshot with the
+        // pending values so the resolver works on the same data model.
+        int savedMax = prefConfig.videoHdrMaxEmittedWhiteNits;
+        int savedTarget = prefConfig.videoHdrPaperWhiteNits;
+        prefConfig.videoHdrPaperWhiteNits = pendingPerceivedNits;
+        prefConfig.videoHdrMaxEmittedWhiteNits = pendingMaxEmittedNits;
 
-        // Can BFI actually activate?  Only check when we have real cadence data.
-        boolean bfiActive;
-        if (streamFps > 0f && displayHz > 0f) {
-            bfiActive = bfiIntent && BfiScheduler.canEnable(streamFps, displayHz, darkFrames);
-        } else {
-            bfiActive = bfiIntent;
-        }
+        ResolvedHdrBfiBrightness r = HdrBfiBrightnessResolver.resolve(
+                prefConfig, streamFps, displayHz);
 
-        float duty = BfiBrightnessCompensation.dutyCycle(bfiActive, 1, 1 + darkFrames);
-        int emitted = BfiBrightnessCompensation.emittedWhiteNits(
-                pendingPerceivedNits, bfiActive, 1, 1 + darkFrames, pendingMaxEmittedNits);
+        // Restore the saved prefs — they are persisted separately.
+        prefConfig.videoHdrPaperWhiteNits = savedTarget;
+        prefConfig.videoHdrMaxEmittedWhiteNits = savedMax;
 
-        String dutyPct = Math.round(duty * 100f) + "%";
-        String clamped = emitted >= pendingPerceivedNits / Math.max(duty, 0.01f) ? "" : " (clamped)";
+        String dutyPct = Math.round(r.dutyCycle * 100f) + "%";
+        boolean clamped = r.emittedNits < Math.round(pendingPerceivedNits / Math.max(r.dutyCycle, 0.01f));
+        String clampNote = clamped ? " (clamped)" : "";
 
-        if (!bfiActive && bfiIntent && streamFps > 0f) {
-            // BFI is configured but won't activate — display cadence mismatch.
-            infoText.setText("BFI configured (" + darkFrames + " dark frames) — "
+        if (r.bfiActive) {
+            infoText.setText("BFI duty: " + dutyPct + "  →  Emitted: "
+                    + r.emittedNits + " nits" + clampNote);
+        } else if (prefConfig.videoBlackFrameInsertion && streamFps > 0f) {
+            infoText.setText("BFI configured (" + r.darkFrames + " dark frames) — "
                     + "not active at current refresh/FPS cadence");
-        } else if (!bfiActive) {
-            infoText.setText("BFI off — emitted = " + emitted + " nits");
         } else {
-            infoText.setText("BFI duty: " + dutyPct + "  →  Emitted: " + emitted + " nits" + clamped);
+            infoText.setText("BFI off — emitted = " + r.emittedNits + " nits");
         }
     }
 
@@ -313,8 +314,10 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
      * bumping max if needed and updating its slider position.
      */
     private void enforceMaxNotBelowPerceived() {
-        if (pendingMaxEmittedNits < pendingPerceivedNits) {
-            pendingMaxEmittedNits = pendingPerceivedNits;
+        int sanitized = PreferenceConfiguration.sanitizeHdrMaxEmittedNits(
+                pendingMaxEmittedNits, pendingPerceivedNits);
+        if (sanitized != pendingMaxEmittedNits) {
+            pendingMaxEmittedNits = sanitized;
             int prog = (pendingMaxEmittedNits - MIN_MAX_EMITTED) / STEP_MAX_EMITTED;
             maxEmittedSeek.setProgress(prog);
             updateMaxEmittedReadout();
@@ -322,10 +325,8 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     }
 
     private void persistBoth() {
-        // Final enforcement before saving.
-        if (pendingMaxEmittedNits < pendingPerceivedNits) {
-            pendingMaxEmittedNits = pendingPerceivedNits;
-        }
+        pendingMaxEmittedNits = PreferenceConfiguration.sanitizeHdrMaxEmittedNits(
+                pendingMaxEmittedNits, pendingPerceivedNits);
 
         prefConfig.videoHdrPaperWhiteNits = pendingPerceivedNits;
         prefConfig.videoHdrMaxEmittedWhiteNits = pendingMaxEmittedNits;
@@ -348,15 +349,14 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
         if (game == null || game.isFinishing()) {
             return;
         }
-        game.applyPaperWhiteNitsLive(pendingPerceivedNits);
+        game.applyHdrBrightnessLive(pendingPerceivedNits, pendingMaxEmittedNits);
     }
 
     private void pushMaxEmittedLive() {
-        Game game = Game.instance;
-        if (game == null || game.isFinishing()) {
-            return;
-        }
-        game.applyMaxEmittedNitsLive(pendingMaxEmittedNits);
+        // pushMaxEmittedLive is now a no-op: both sliders are pushed together
+        // via pushToLiveRenderer().  Keep the callsite for clarity (it shows
+        // the push intent), but the actual work happens in the combined method.
+        pushToLiveRenderer();
     }
 
     // ---- diagnostics ----

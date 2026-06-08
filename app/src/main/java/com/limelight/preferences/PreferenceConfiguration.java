@@ -219,6 +219,10 @@ public class PreferenceConfiguration {
 
     private static final String DEFAULT_POST_PROCESS_RENDERER = "0";
     private static final String DEFAULT_VIDEO_HDR_MODE = "0";
+    // String-valued defaults for SharedPreferences.  Keep in sync with the
+    // int DEFAULT constants above — Android's SharedPreferences stores strings
+    // for EditTextPreference, so we need string literals (not valueOf, which
+    // is not a JLS compile-time constant expression).
     private static final String DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS = "200";
     private static final String DEFAULT_VIDEO_HDR_EXPAND_GAMUT = "0";
     private static final boolean DEFAULT_VIDEO_BFI = false;
@@ -242,14 +246,29 @@ public class PreferenceConfiguration {
     public static final int HDR_GAMUT_WIDE = 2;      // P3 -> Rec.2020
     public static final int HDR_GAMUT_SUPER = 3;      // passthrough (max boost)
 
-    // HDR paper-white calibration range — single source of truth for
-    // PreferenceConfiguration clamps and PaperWhiteCalibrationActivity sliders.
+    // HDR paper-white calibration range and defaults — single source of truth
+    // for PreferenceConfiguration clamps and PaperWhiteCalibrationActivity sliders.
+    public static final int HDR_PAPER_WHITE_DEFAULT = 200;
     public static final int HDR_PAPER_WHITE_MIN = 50;
     public static final int HDR_PAPER_WHITE_MAX = 1000;
     public static final int HDR_PAPER_WHITE_STEP = 25;
+
+    public static final int HDR_MAX_EMITTED_DEFAULT = 1000;
     public static final int HDR_MAX_EMITTED_MIN = 80;
     public static final int HDR_MAX_EMITTED_MAX = 2000;
     public static final int HDR_MAX_EMITTED_STEP = 50;
+
+    /**
+     * Sanitize a user-supplied max-emitted-nits value: clamp to the valid
+     * range and ensure it is at least {@code targetPerceivedNits}.
+     * <p>Call this in both preference loading and live slider state so
+     * the policy (max ≥ target) is consistent everywhere.</p>
+     */
+    public static int sanitizeHdrMaxEmittedNits(int maxEmitted, int targetPerceivedNits) {
+        int clamped = Math.max(HDR_MAX_EMITTED_MIN,
+                Math.min(maxEmitted, HDR_MAX_EMITTED_MAX));
+        return Math.max(clamped, targetPerceivedNits);
+    }
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -1087,18 +1106,10 @@ private static int getFramePacingValue(Context context) {
         config.videoBlackFrameInsertion = prefs.getBoolean(VIDEO_BFI_PREF_STRING, DEFAULT_VIDEO_BFI);
         config.videoBfiDarkFrames = BfiScheduler.sanitizeDarkFrames(
                 getIntPref(prefs, VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES));
-        config.videoHdrMaxEmittedWhiteNits = getIntPref(prefs, VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS);
-        if (config.videoHdrMaxEmittedWhiteNits < HDR_MAX_EMITTED_MIN) {
-            config.videoHdrMaxEmittedWhiteNits = HDR_MAX_EMITTED_MIN;
-        }
-        if (config.videoHdrMaxEmittedWhiteNits > HDR_MAX_EMITTED_MAX) {
-            config.videoHdrMaxEmittedWhiteNits = HDR_MAX_EMITTED_MAX;
-        }
-        // Emitted clamp must be at least as high as the target perceived white.
-        // Without this, compensation would always be clamped below the target.
-        if (config.videoHdrMaxEmittedWhiteNits < config.videoHdrPaperWhiteNits) {
-            config.videoHdrMaxEmittedWhiteNits = config.videoHdrPaperWhiteNits;
-        }
+        config.videoHdrMaxEmittedWhiteNits = sanitizeHdrMaxEmittedNits(
+                getIntPref(prefs, VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING,
+                        DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS),
+                config.videoHdrPaperWhiteNits);
 
         config.enableAudioFx = prefs.getBoolean(ENABLE_AUDIO_FX_PREF_STRING, DEFAULT_ENABLE_AUDIO_FX);
         config.reduceRefreshRate = prefs.getBoolean(REDUCE_REFRESH_RATE_PREF_STRING, DEFAULT_REDUCE_REFRESH_RATE);

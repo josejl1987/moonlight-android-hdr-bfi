@@ -4114,23 +4114,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     /**
-     * Push a paper-white nits change into the live renderer's in-memory
-     * config and trigger a shader uniform update. The value is persisted
+     * Push both HDR brightness values into the live renderer's in-memory
+     * config and trigger a shader uniform update. The values are persisted
      * to prefs by the caller (usually on stop/done).
      */
-    public void applyPaperWhiteNitsLive(int nits) {
-        prefConfig.videoHdrPaperWhiteNits = nits;
-        if (postProcessRenderer != null) {
-            postProcessRenderer.updateSettings();
-        }
-    }
-
-    /**
-     * Push a max-emitted-white-nits change into the live renderer's
-     * in-memory config and trigger a shader uniform update.
-     */
-    public void applyMaxEmittedNitsLive(int nits) {
-        prefConfig.videoHdrMaxEmittedWhiteNits = nits;
+    public void applyHdrBrightnessLive(int targetPerceivedNits, int maxEmittedNits) {
+        prefConfig.videoHdrPaperWhiteNits = targetPerceivedNits;
+        prefConfig.videoHdrMaxEmittedWhiteNits = maxEmittedNits;
         if (postProcessRenderer != null) {
             postProcessRenderer.updateSettings();
         }
