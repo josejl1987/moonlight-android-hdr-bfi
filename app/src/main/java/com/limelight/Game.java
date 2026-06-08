@@ -294,6 +294,9 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     private ViewParent rootView;
     private ClipboardManager clipboardManager;
+
+    // HDR / BFI / gamut live controls overlay (replaces PaperWhiteCalibrationActivity).
+    private HdrControlsOverlay hdrControlsOverlay;
     private boolean clipboardSyncRunning = false;
 
     private NvHTTP httpConn;
@@ -302,6 +305,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         void showMenu(GameInputDevice devic);
         void hideMenu();
         boolean isMenuOpen();
+    }
+
+    // Package-private accessors for HdrControlsOverlay — avoids leaking the
+    // private fields while keeping the overlay in the same package.
+    PreferenceConfiguration getPrefConfigForOverlay() {
+        return prefConfig;
+    }
+
+    float getCurrentDisplayRefreshRateForOverlay() {
+        return currentDisplayRefreshRate;
     }
 
     public GameMenuCallbacks gameMenuCallbacks;
@@ -476,6 +489,16 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         streamContainer.setCommitTextEnabled(prefConfig.enableCommitText);
 
         rootView = streamContainer.getParent();
+
+        // HDR / BFI live controls overlay — sibling of streamContainer inside
+        // rootView. Starts GONE; opened via showHdrControlsOverlay().
+        if (rootView instanceof android.widget.FrameLayout) {
+            hdrControlsOverlay = new HdrControlsOverlay(this);
+            ((android.widget.FrameLayout) rootView).addView(hdrControlsOverlay,
+                    new android.widget.FrameLayout.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        }
 
         //串流画面 顶部居中显示
         if(prefConfig.alignDisplayTopCenter){
@@ -4068,15 +4091,40 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     /**
-     * Launch the paper-white calibration wizard as a separate Activity.
-     * The wizard persists its own pref changes and applies them live to
-     * the active renderer via {@link #applyHdrBrightnessLive(int, int)}.
+     * Show the in-game transparent HDR / BFI / gamut / paper-white / clamp
+     * overlay. Replaces the deleted {@code PaperWhiteCalibrationActivity} so
+     * the user can see the live stream while adjusting. Safe to call from
+     * the UI thread; the overlay is a child of the same parent as
+     * {@code streamContainer}.
      */
-    public void launchPaperWhiteCalibration() {
-        Intent intent = new Intent(this, PaperWhiteCalibrationActivity.class);
-        intent.putExtra(PaperWhiteCalibrationActivity.EXTRA_STREAM_FPS, prefConfig.fps);
-        intent.putExtra(PaperWhiteCalibrationActivity.EXTRA_DISPLAY_HZ, currentDisplayRefreshRate);
+    public void showHdrControlsOverlay() {
+        if (hdrControlsOverlay == null) {
+            return;
+        }
+        hdrControlsOverlay.show();
+    }
+
+    /**
+     * Hide the HDR controls overlay and persist slider values to
+     * {@link SharedPreferences}. Stream input is restored immediately.
+     */
+    public void hideHdrControlsOverlay() {
+        if (hdrControlsOverlay == null) {
+            return;
+        }
+        hdrControlsOverlay.hide();
+    }
+
+    /**
+     * Force a full stream reconnect, preserving the launch intent extras.
+     * Used by {@link HdrControlsOverlay#cycleHdrMode()} when the HDR output
+     * mode changes — the EGL surface + shader chain must be recreated.
+     */
+    public void reconnectStream() {
+        Intent intent = new Intent(getIntent());
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         startActivity(intent);
+        finish();
     }
 
     /**
@@ -4214,6 +4262,13 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
     @Override
     public void onBackPressed() {
+        // First back press: dismiss the HDR controls overlay if it's open
+        // (and persist the slider values). Second press: fall through to
+        // the default back behavior.
+        if (hdrControlsOverlay != null && hdrControlsOverlay.isOverlayVisible()) {
+            hideHdrControlsOverlay();
+            return;
+        }
         if(prefConfig.enableBackMenu){
             showGameMenu(null);
             return;

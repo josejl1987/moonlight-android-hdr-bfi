@@ -235,16 +235,6 @@
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
         </activity>
 
-        <!-- Test UX: paper-white calibration wizard. Internal-only,
-             launched from the in-game advanced menu. AppTheme inherits
-             from AppBaseTheme (Theme.MaterialComponents.NoActionBar), so
-             no separate NoActionBar style is needed. -->
-        <activity
-            android:name=".PaperWhiteCalibrationActivity"
-            android:exported="false"
-            android:theme="@style/AppTheme" />
-
-
         <activity android:name=".DebugInfoActivity"
             android:launchMode="singleTask"/>
 

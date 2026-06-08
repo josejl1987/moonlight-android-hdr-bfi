@@ -758,12 +758,26 @@
 <string name="summary_video_bfi_dark_frames">Number of black refresh intervals inserted between visible frames</string>
 
     <string name="game_menu_cycle_gamut">Cycle gamut</string>
-    <string name="game_menu_calibrate_paper_white">Calibrate paper white</string>
-    <string name="paper_white_title">Paper white calibration</string>
-    <string name="paper_white_done">Done</string>
-    <string name="paper_white_reset">Reset defaults</string>
+    <string name="game_menu_hdr_controls">HDR controls</string>
+    <string name="hdr_overlay_title">HDR controls</string>
+    <string name="hdr_overlay_close">Close</string>
+    <string name="hdr_overlay_peek">Peek</string>
     <string name="game_menu_toggle_bfi">Toggle BFI</string>
     <string name="bfi_toggle_title">Switching BFI mode…</string>
     <string name="bfi_toggle_msg">Please wait while the renderer restarts.</string>
     <string name="bfi_stall_warning">Stream stalling — BFI may show black frames</string>
+
+    <!-- HdrControlsOverlay -->
+    <string name="hdr_overlay_bfi">BFI</string>
+    <string name="hdr_overlay_gamut">Gamut</string>
+    <string name="hdr_overlay_perceived_label">Target perceived SDR white</string>
+    <string name="hdr_overlay_max_emitted_label">Max emitted HDR clamp</string>
+    <string name="hdr_overlay_nits_format">%d nits</string>
+    <string name="hdr_overlay_hdr_mode_format">HDR: %s</string>
+    <string name="hdr_overlay_mode_scrgb">scRGB</string>
+    <string name="hdr_overlay_mode_hdr10">HDR10</string>
+    <string name="hdr_overlay_mode_off">Off</string>
+    <string name="hdr_overlay_bfi_duty_format">BFI duty: %s  →  Emitted: %d nits</string>
+    <string name="hdr_overlay_bfi_configured_format">BFI configured (%d dark frames)</string>
+    <string name="hdr_overlay_bfi_off_format">BFI off — emitted = %d nits</string>
 </resources>

@@ -247,7 +247,7 @@ public class PreferenceConfiguration {
     public static final int HDR_GAMUT_SUPER = 3;      // passthrough (max boost)
 
     // HDR paper-white calibration range and defaults — single source of truth
-    // for PreferenceConfiguration clamps and PaperWhiteCalibrationActivity sliders.
+    // for PreferenceConfiguration clamps and HdrControlsOverlay sliders.
     public static final int HDR_PAPER_WHITE_DEFAULT = 200;
     public static final int HDR_PAPER_WHITE_MIN = 50;
     public static final int HDR_PAPER_WHITE_MAX = 1000;
