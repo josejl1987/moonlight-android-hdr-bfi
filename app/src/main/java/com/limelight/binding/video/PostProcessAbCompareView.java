@@ -19,17 +19,15 @@ import android.view.View;
  * does not receive them.</p>
  *
  * <p>The View does NOT own the bitmaps — the host activity caches them and
- * recycles them in {@code onDestroy}/{@code onStop}. {@link #release()}
- * only nulls local references so the View can be GC'd.</p>
+ * recycles them in {@code onDestroy}/{@code onStop}.</p>
  */
 public final class PostProcessAbCompareView extends View {
     private final Bitmap bitmapA;
     private final Bitmap bitmapB;
     private final Paint bitmapPaint;
     private final Paint dividerPaint;
+    private final Rect fullDst = new Rect();
     private float dividerX;
-    private float downX;
-    private boolean dragging;
 
     public PostProcessAbCompareView(Context context, Bitmap bitmapA, Bitmap bitmapB) {
         super(context);
@@ -48,7 +46,6 @@ public final class PostProcessAbCompareView extends View {
     @Override
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
-        // Start with the divider centred.
         if (oldw == 0 && oldh == 0) {
             dividerX = w / 2f;
         }
@@ -58,15 +55,10 @@ public final class PostProcessAbCompareView extends View {
     protected void onDraw(Canvas canvas) {
         int w = getWidth();
         int h = getHeight();
-        if (w <= 0 || h <= 0) {
-            return;
-        }
-        // Clamp dividerX defensively in case onMeasure raced a touch move.
+        if (w <= 0 || h <= 0) return;
+
         float dx = Math.max(0f, Math.min(w, dividerX));
-        // Both bitmaps use the SAME full-frame dst rect so their scale is
-        // identical — the divider is applied via clipRect, not by slicing
-        // the dst rect (which would give each side a different scale).
-        Rect fullDst = new Rect(0, 0, w, h);
+        fullDst.set(0, 0, w, h);
 
         // Left half — bitmap A, clipped to divider.
         canvas.save();
@@ -80,42 +72,17 @@ public final class PostProcessAbCompareView extends View {
         canvas.drawBitmap(bitmapB, null, fullDst, bitmapPaint);
         canvas.restore();
 
-        // White divider line down the centre axis.
+        // White divider line.
         canvas.drawLine(dx, 0f, dx, h, dividerPaint);
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                downX = event.getX();
-                dragging = true;
-                // Seed the divider at the touch point so the user can grab
-                // it from anywhere on screen, not just the initial centre.
-                dividerX = downX;
-                invalidate();
-                return true;
-            case MotionEvent.ACTION_MOVE:
-                if (dragging) {
-                    dividerX = Math.max(0f, Math.min((float) getWidth(), event.getX()));
-                    invalidate();
-                }
-                return true;
-            case MotionEvent.ACTION_UP:
-            case MotionEvent.ACTION_CANCEL:
-                dragging = false;
-                return true;
-            default:
-                return true; // consume all (REQ-3-6)
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_MOVE) {
+            dividerX = Math.max(0f, Math.min(getWidth(), event.getX()));
+            invalidate();
         }
-    }
-
-    /**
-     * Drop local references so the View can be garbage-collected. The host
-     * activity owns and recycles the bitmaps; this method intentionally
-     * does NOT call {@code bitmap.recycle()}.
-     */
-    public void release() {
-        // No bitmap ownership here — see class-level Javadoc.
+        return true; // consume all events so the game surface beneath does not receive them
     }
 }

@@ -11,11 +11,9 @@ import android.os.Looper;
 import android.text.TextUtils;
 import android.view.ContextThemeWrapper;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.ViewTreeObserver;
 import android.view.Window;
 import android.widget.ArrayAdapter;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import com.limelight.binding.input.GameInputDevice;
@@ -286,15 +284,8 @@ if (!game.isOnExternalDisplay()) {
         options.add(new MenuOption(getString(R.string.game_menu_test_patterns), true, () -> showTestPatternsDialog()));
         options.add(new MenuOption(getString(R.string.game_menu_toggle_bfi), true, game::cycleRenderMode));
         options.add(new MenuOption(getString(R.string.game_menu_task_manager), true, () -> sendKeys(new short[]{KeyboardTranslator.VK_LCONTROL, KeyboardTranslator.VK_LSHIFT, KeyboardTranslator.VK_ESCAPE})));
-        // A/B frame capture — the capture callback fires after a 2 s
-        // cooldown. MenuOption does not support a disabled state yet;
-        // see notifyCaptureButtonReenabled TODO.
-        options.add(new MenuOption(getString(R.string.capture_a_label), false, () -> {
-            game.captureFrameA(() -> game.notifyCaptureButtonReenabled(R.string.capture_a_label));
-        }));
-        options.add(new MenuOption(getString(R.string.capture_b_label), false, () -> {
-            game.captureFrameB(() -> game.notifyCaptureButtonReenabled(R.string.capture_b_label));
-        }));
+        options.add(new MenuOption(getString(R.string.capture_a_label), false, game::captureFrameA));
+        options.add(new MenuOption(getString(R.string.capture_b_label), false, game::captureFrameB));
         options.add(new MenuOption(getString(R.string.compare_ab_label), false, () -> game.openCompareView()));
         options.add(new MenuOption(getString(R.string.clear_captures_label), false, () -> game.clearCaptures()));
 
@@ -374,11 +365,6 @@ if (!game.isOnExternalDisplay()) {
         showMenuDialog(getString(R.string.quick_menu_title), options.toArray(new MenuOption[options.size()]));
     }
 
-    /**
-     * Show the in-game Test Patterns submenu. Four rows, each copies a
-     * testufo.com URL to the clipboard. URLs are hardcoded literals
-     * (not in strings.xml — they are not localizable).
-     */
     private void showTestPatternsDialog() {
         final String[][] rows = {
                 {getString(R.string.testufo_blackframes), "https://www.testufo.com/blackframes"},
@@ -386,49 +372,23 @@ if (!game.isOnExternalDisplay()) {
                 {getString(R.string.testufo_photo),       "https://www.testufo.com/photo"},
                 {getString(R.string.testufo_starfield),   "https://www.testufo.com/starfield"},
         };
-        String[] titles = new String[rows.length];
-        String[] subtitles = new String[rows.length];
+        CharSequence[] items = new CharSequence[rows.length];
         for (int i = 0; i < rows.length; i++) {
-            titles[i] = rows[i][0];
-            subtitles[i] = rows[i][1];
+            items[i] = rows[i][0] + "\n" + rows[i][1];
         }
-
-        int themeResId = game.getApplicationInfo().theme;
-        Context themedContext = new ContextThemeWrapper(dialogScreenContext, themeResId);
-
-        // Two-line row layout: title (medium) over URL (small, dim).
-        ArrayAdapter<String> adapter = new ArrayAdapter<String>(themedContext,
-                android.R.layout.simple_list_item_2, android.R.id.text1, titles) {
-            @Override
-            public android.view.View getView(int position, android.view.View convertView,
-                                             android.view.ViewGroup parent) {
-                android.view.View v = super.getView(position, convertView, parent);
-                TextView t1 = v.findViewById(android.R.id.text1);
-                TextView t2 = v.findViewById(android.R.id.text2);
-                if (t1 != null) t1.setText(titles[position]);
-                if (t2 != null) t2.setText(subtitles[position]);
-                return v;
-            }
-        };
-
-        new AlertDialog.Builder(themedContext)
+        new AlertDialog.Builder(dialogScreenContext)
                 .setTitle(R.string.game_menu_test_patterns)
-                .setAdapter(adapter, (dialog, which) -> copyToClipboard(rows[which][1]))
+                .setItems(items, (d, which) -> copyToClipboard(rows[which][1]))
                 .setNegativeButton(R.string.game_menu_cancel, null)
                 .show();
     }
 
     private void copyToClipboard(String url) {
-        try {
-            ClipboardManager cm = (ClipboardManager)
-                    game.getSystemService(Context.CLIPBOARD_SERVICE);
-            if (cm != null) {
-                cm.setPrimaryClip(ClipData.newPlainText("url", url));
-            }
-            Toast.makeText(game, R.string.test_patterns_copied, Toast.LENGTH_SHORT).show();
-        } catch (Exception e) {
-            Toast.makeText(game, R.string.test_patterns_copied, Toast.LENGTH_SHORT).show();
+        ClipboardManager cm = (ClipboardManager) game.getSystemService(Context.CLIPBOARD_SERVICE);
+        if (cm != null) {
+            cm.setPrimaryClip(ClipData.newPlainText("url", url));
         }
+        Toast.makeText(game, R.string.test_patterns_copied, Toast.LENGTH_SHORT).show();
     }
 
     @Override

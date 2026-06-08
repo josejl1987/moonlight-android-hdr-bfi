@@ -14,41 +14,54 @@ public final class HdrBfiBrightnessResolver {
     private HdrBfiBrightnessResolver() {}
 
     /**
-     * Resolve the effective HDR/BFI brightness from raw settings and
-     * current stream/display cadence.
-     *
-     * @param prefs     resolved preference snapshot
-     * @param streamFps stream frame rate (Hz), 0 if unknown
-     * @param displayHz display refresh rate (Hz), 0 if unknown
-     * @return resolved brightness state
+     * Resolve the effective HDR/BFI brightness from a {@code PreferenceConfiguration}
+     * snapshot and current stream/display cadence.
      */
     public static ResolvedHdrBfiBrightness resolve(
             PreferenceConfiguration prefs,
             float streamFps,
             float displayHz) {
+        return resolve(
+                prefs.videoBlackFrameInsertion,
+                prefs.videoBfiDarkFrames,
+                prefs.videoHdrMode,
+                prefs.videoHdrPaperWhiteNits,
+                prefs.videoHdrMaxEmittedWhiteNits,
+                streamFps,
+                displayHz);
+    }
 
-        int darkFrames = BfiScheduler.sanitizeDarkFrames(prefs.videoBfiDarkFrames);
-        boolean bfiIntent = prefs.videoBlackFrameInsertion;
-        boolean bfiActive = bfiIntent
-                && BfiScheduler.canEnable(streamFps, displayHz, darkFrames);
-        boolean hdrIntent = prefs.videoHdrMode != PreferenceConfiguration.VIDEO_HDR_OFF;
+    /**
+     * Resolve the effective HDR/BFI brightness from individual parameters.
+     * This overload avoids temporary prefConfig mutation in the calibration UI.
+     */
+    public static ResolvedHdrBfiBrightness resolve(
+            boolean bfiEnabled,
+            int darkFrames,
+            int hdrMode,
+            int targetPerceivedNits,
+            int maxEmittedNits,
+            float streamFps,
+            float displayHz) {
 
-        int target = prefs.videoHdrPaperWhiteNits;
-        int max = prefs.videoHdrMaxEmittedWhiteNits;
+        int safeDarkFrames = BfiScheduler.sanitizeDarkFrames(darkFrames);
+        boolean bfiActive = bfiEnabled
+                && BfiScheduler.canEnable(streamFps, displayHz, safeDarkFrames);
+        boolean hdrIntent = hdrMode != PreferenceConfiguration.VIDEO_HDR_OFF;
 
-        // Compensation only takes effect when HDR is on and BFI actually activates.
         int emitted;
         float duty;
         if (hdrIntent && bfiActive) {
-            duty = BfiBrightnessCompensation.dutyCycle(true, 1, 1 + darkFrames);
+            duty = BfiBrightnessCompensation.dutyCycle(true, 1, 1 + safeDarkFrames);
             emitted = BfiBrightnessCompensation.emittedWhiteNits(
-                    target, true, 1, 1 + darkFrames, max);
+                    targetPerceivedNits, true, 1, 1 + safeDarkFrames, maxEmittedNits);
         } else {
             duty = 1.0f;
-            emitted = target;
+            emitted = targetPerceivedNits;
         }
 
         return new ResolvedHdrBfiBrightness(
-                target, max, emitted, duty, darkFrames, bfiActive, hdrIntent);
+                targetPerceivedNits, maxEmittedNits, emitted,
+                duty, safeDarkFrames, bfiActive, hdrIntent);
     }
 }

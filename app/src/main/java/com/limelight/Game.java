@@ -256,7 +256,8 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     // 720p to stay under the ~8 MB heap budget per REQ-3-9.
     private static final int CAPTURE_WIDTH = 1280;
     private static final int CAPTURE_HEIGHT = 720;
-    private static final long CAPTURE_COOLDOWN_MS = 2000L;
+
+
     private Bitmap bitmapA;
     private Bitmap bitmapB;
     private PostProcessAbCompareView compareView;
@@ -4044,39 +4045,27 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
      * button before invoking). Caches the bitmap and re-enables the
      * trigger button via a 2-second {@code Handler.postDelayed} cooldown.
      */
-    public void captureFrameA(Runnable onButtonReenable) {
-        Bitmap bmp = readbackCaptureBitmap();
-        if (bmp != null) {
-            if (bitmapA != null) {
-                bitmapA.recycle();
-            }
-            bitmapA = bmp;
-            Toast.makeText(this, R.string.capture_success_a, Toast.LENGTH_SHORT).show();
-        } else {
-            Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_SHORT).show();
-        }
-        if (onButtonReenable != null) {
-            timerHandler.postDelayed(onButtonReenable, CAPTURE_COOLDOWN_MS);
-        }
+    public void captureFrameA() {
+        captureFrame(true, R.string.capture_success_a);
     }
 
-    /**
-     * A/B frame capture — slot B. See {@link #captureFrameA(Runnable)} for
-     * semantics.
-     */
-    public void captureFrameB(Runnable onButtonReenable) {
+    public void captureFrameB() {
+        captureFrame(false, R.string.capture_success_b);
+    }
+
+    private void captureFrame(boolean slotA, int successResId) {
         Bitmap bmp = readbackCaptureBitmap();
         if (bmp != null) {
-            if (bitmapB != null) {
-                bitmapB.recycle();
+            if (slotA) {
+                if (bitmapA != null) bitmapA.recycle();
+                bitmapA = bmp;
+            } else {
+                if (bitmapB != null) bitmapB.recycle();
+                bitmapB = bmp;
             }
-            bitmapB = bmp;
-            Toast.makeText(this, R.string.capture_success_b, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, successResId, Toast.LENGTH_SHORT).show();
         } else {
             Toast.makeText(this, R.string.capture_failed, Toast.LENGTH_SHORT).show();
-        }
-        if (onButtonReenable != null) {
-            timerHandler.postDelayed(onButtonReenable, CAPTURE_COOLDOWN_MS);
         }
     }
 
@@ -4103,17 +4092,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     }
 
     /**
-     * Live re-apply of post-process settings to the active renderer. Used
-     * by the paper-white calibration wizard to push SeekBar drags into the
-     * live shader uniforms without going through the quick-setup panel.
-     */
-    public void applyPostProcessSettingsLive() {
-        if (postProcessRenderer != null) {
-            postProcessRenderer.updateSettings();
-        }
-    }
-
-    /**
      * Push both HDR brightness values into the live renderer's in-memory
      * config and trigger a shader uniform update. The values are persisted
      * to prefs by the caller (usually on stop/done).
@@ -4129,7 +4107,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     /**
      * Launch the paper-white calibration wizard as a separate Activity.
      * The wizard persists its own pref changes and applies them live to
-     * the active renderer via {@link #applyPostProcessSettingsLive()}.
+     * the active renderer via {@link #applyHdrBrightnessLive(int, int)}.
      */
     public void launchPaperWhiteCalibration() {
         Intent intent = new Intent(this, PaperWhiteCalibrationActivity.class);
@@ -4167,20 +4145,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
     };
 
     /**
-     * Callback fired after the 2 s capture cooldown expires. The capture
-     * menu option is always clickable (MenuOption has no disabled state),
-     * so this is informational only — a follow-up should wire real menu
-     * cooldown state if needed.
-     *
-     * <p>TODO: Re-enable a disabled menu item if MenuOption ever gains an
-     * enabled/disabled state, or show a countdown indicator in the label.
-     * See review verdict Blocker 6.</p>
-     */
-    public void notifyCaptureButtonReenabled(int labelResId) {
-        // Readback and cooldown handling deferred — see readbackCaptureBitmap().
-    }
-
-    /**
      * Attach a full-screen compare overlay above the game surface. The
      * View is added to {@code streamContainer.getParent()} (a FrameLayout
      * per activity_game.xml) so it sits in z-order above the stream and
@@ -4212,7 +4176,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         if (parent instanceof ViewGroup) {
             ((ViewGroup) parent).removeView(compareView);
         }
-        compareView.release();
         compareView = null;
     }
 
@@ -4336,19 +4299,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
      * Release both renderers (if any) and point the decoder back at the
      * direct surface. Idempotent.
      */
-    private void stopActiveRenderer() {
-        if (postProcessRenderer != null) {
-            postProcessRenderer.release();
-            postProcessRenderer = null;
-        }
-        if (decoderRenderer != null && streamContainer != null) {
-            decoderRenderer.setRenderTarget(streamContainer.getSurface());
-        }
-    }
-
-    /** Stub kept for compile compatibility. Renderer stall detection
-     *  was not available on this branch; callers no longer need it. */
-
     @Override
     public void onUsbPermissionPromptStarting() {
         // Disable PiP auto-enter while the USB permission prompt is on-screen. This prevents
