@@ -5,19 +5,23 @@ public final class BfiScheduler {
     private int darkFrames = 1;
     private int phase;
 
+    /** Clamp a user-supplied dark-frame count to a valid minimum of 1. */
+    public static int sanitizeDarkFrames(int darkFrames) {
+        return Math.max(1, darkFrames);
+    }
+
     public static boolean canEnable(float streamFps, float displayHz, int darkFrames) {
         if (streamFps <= 0f || displayHz <= 0f) {
             return false;
         }
 
-        int clampedDarkFrames = Math.max(1, darkFrames);
-        float requiredHz = streamFps * (1f + clampedDarkFrames);
+        float requiredHz = streamFps * (1f + sanitizeDarkFrames(darkFrames));
         return Math.abs(displayHz - requiredHz) <= 3f;
     }
 
     public void configure(boolean enabled, int darkFrames) {
         this.enabled = enabled;
-        this.darkFrames = Math.max(1, darkFrames);
+        this.darkFrames = sanitizeDarkFrames(darkFrames);
         this.phase = 0;
     }
 

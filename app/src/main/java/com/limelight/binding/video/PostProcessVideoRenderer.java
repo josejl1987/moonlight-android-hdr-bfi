@@ -692,7 +692,7 @@ public final class PostProcessVideoRenderer implements SurfaceTexture.OnFrameAva
         // is already PQ-encoded and the EGL surface is BT.2020 PQ.
         hdrUniforms.expandGamut = clampGamut(prefConfig.videoHdrExpandGamut);
 
-        int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
+        int darkFrames = BfiScheduler.sanitizeDarkFrames(prefConfig.videoBfiDarkFrames);
         boolean bfiActive = prefConfig.videoBlackFrameInsertion
                 && BfiScheduler.canEnable(streamFps, displayRefreshRate, darkFrames);
         bfiScheduler.configure(bfiActive, darkFrames);

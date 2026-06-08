@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.view.Display;
 
+import com.limelight.binding.video.BfiScheduler;
 import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.profiles.ProfilesManager;
 
@@ -240,6 +241,15 @@ public class PreferenceConfiguration {
     public static final int HDR_GAMUT_EXPANDED = 1;  // Expanded709 -> Rec.2020
     public static final int HDR_GAMUT_WIDE = 2;      // P3 -> Rec.2020
     public static final int HDR_GAMUT_SUPER = 3;      // passthrough (max boost)
+
+    // HDR paper-white calibration range — single source of truth for
+    // PreferenceConfiguration clamps and PaperWhiteCalibrationActivity sliders.
+    public static final int HDR_PAPER_WHITE_MIN = 50;
+    public static final int HDR_PAPER_WHITE_MAX = 1000;
+    public static final int HDR_PAPER_WHITE_STEP = 25;
+    public static final int HDR_MAX_EMITTED_MIN = 80;
+    public static final int HDR_MAX_EMITTED_MAX = 2000;
+    public static final int HDR_MAX_EMITTED_STEP = 50;
 
     public static final int FRAME_PACING_MIN_LATENCY = 0;
     public static final int FRAME_PACING_BALANCED = 1;
@@ -1064,27 +1074,25 @@ private static int getFramePacingValue(Context context) {
             config.videoHdrMode = VIDEO_HDR_OFF;
         }
         config.videoHdrPaperWhiteNits = getIntPref(prefs, VIDEO_HDR_PAPER_WHITE_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_PAPER_WHITE_NITS);
-        if (config.videoHdrPaperWhiteNits < 50) {
-            config.videoHdrPaperWhiteNits = 50;
+        if (config.videoHdrPaperWhiteNits < HDR_PAPER_WHITE_MIN) {
+            config.videoHdrPaperWhiteNits = HDR_PAPER_WHITE_MIN;
         }
-        if (config.videoHdrPaperWhiteNits > 1000) {
-            config.videoHdrPaperWhiteNits = 1000;
+        if (config.videoHdrPaperWhiteNits > HDR_PAPER_WHITE_MAX) {
+            config.videoHdrPaperWhiteNits = HDR_PAPER_WHITE_MAX;
         }
         config.videoHdrExpandGamut = getIntPref(prefs, VIDEO_HDR_EXPAND_GAMUT_PREF_STRING, DEFAULT_VIDEO_HDR_EXPAND_GAMUT);
         if (config.videoHdrExpandGamut < HDR_GAMUT_ACCURATE || config.videoHdrExpandGamut > HDR_GAMUT_SUPER) {
             config.videoHdrExpandGamut = HDR_GAMUT_ACCURATE;
         }
         config.videoBlackFrameInsertion = prefs.getBoolean(VIDEO_BFI_PREF_STRING, DEFAULT_VIDEO_BFI);
-        config.videoBfiDarkFrames = getIntPref(prefs, VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES);
-        if (config.videoBfiDarkFrames < 1) {
-            config.videoBfiDarkFrames = 1;
-        }
+        config.videoBfiDarkFrames = BfiScheduler.sanitizeDarkFrames(
+                getIntPref(prefs, VIDEO_BFI_DARK_FRAMES_PREF_STRING, DEFAULT_VIDEO_BFI_DARK_FRAMES));
         config.videoHdrMaxEmittedWhiteNits = getIntPref(prefs, VIDEO_HDR_MAX_EMITTED_NITS_PREF_STRING, DEFAULT_VIDEO_HDR_MAX_EMITTED_NITS);
-        if (config.videoHdrMaxEmittedWhiteNits < 80) {
-            config.videoHdrMaxEmittedWhiteNits = 80;
+        if (config.videoHdrMaxEmittedWhiteNits < HDR_MAX_EMITTED_MIN) {
+            config.videoHdrMaxEmittedWhiteNits = HDR_MAX_EMITTED_MIN;
         }
-        if (config.videoHdrMaxEmittedWhiteNits > 2000) {
-            config.videoHdrMaxEmittedWhiteNits = 2000;
+        if (config.videoHdrMaxEmittedWhiteNits > HDR_MAX_EMITTED_MAX) {
+            config.videoHdrMaxEmittedWhiteNits = HDR_MAX_EMITTED_MAX;
         }
         // Emitted clamp must be at least as high as the target perceived white.
         // Without this, compensation would always be clamped below the target.

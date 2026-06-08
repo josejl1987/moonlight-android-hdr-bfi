@@ -51,16 +51,16 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
     static final String EXTRA_STREAM_FPS = "streamFps";
     static final String EXTRA_DISPLAY_HZ = "displayHz";
 
-    /** Perceived white range. */
-    private static final int MIN_PERCEIVED_NITS = 50;
-    private static final int MAX_PERCEIVED_NITS = 1000;
-    private static final int STEP_PERCEIVED = 25;
+    /** Perceived white range — sourced from PreferenceConfiguration. */
+    private static final int MIN_PERCEIVED_NITS = PreferenceConfiguration.HDR_PAPER_WHITE_MIN;
+    private static final int MAX_PERCEIVED_NITS = PreferenceConfiguration.HDR_PAPER_WHITE_MAX;
+    private static final int STEP_PERCEIVED = PreferenceConfiguration.HDR_PAPER_WHITE_STEP;
     private static final int DEFAULT_PERCEIVED = 200;
 
-    /** Max emitted clamp range. */
-    private static final int MIN_MAX_EMITTED = 80;
-    private static final int MAX_MAX_EMITTED = 2000;
-    private static final int STEP_MAX_EMITTED = 50;
+    /** Max emitted clamp range — sourced from PreferenceConfiguration. */
+    private static final int MIN_MAX_EMITTED = PreferenceConfiguration.HDR_MAX_EMITTED_MIN;
+    private static final int MAX_MAX_EMITTED = PreferenceConfiguration.HDR_MAX_EMITTED_MAX;
+    private static final int STEP_MAX_EMITTED = PreferenceConfiguration.HDR_MAX_EMITTED_STEP;
     private static final int DEFAULT_MAX_EMITTED = 1000;
 
     private PreferenceConfiguration prefConfig;
@@ -278,7 +278,7 @@ public class PaperWhiteCalibrationActivity extends AppCompatActivity {
      */
     private void updateInfoRow() {
         boolean bfiIntent = prefConfig.videoBlackFrameInsertion;
-        int darkFrames = Math.max(1, prefConfig.videoBfiDarkFrames);
+        int darkFrames = BfiScheduler.sanitizeDarkFrames(prefConfig.videoBfiDarkFrames);
 
         // Can BFI actually activate?  Only check when we have real cadence data.
         boolean bfiActive;
