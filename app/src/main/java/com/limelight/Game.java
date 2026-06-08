@@ -531,8 +531,7 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
 
         // Separate TextView for transient flash messages (e.g. gamut cycle
         // confirmation). Lives next to postProcessOverlay but is NOT updated
-        // by the renderer's status publish, so the flash text survives the
-        // next 60-frame status push — see discovery-overlay-clobber.
+        // by the renderer's regular status publish, so the flash text survives.
         postProcessFlashOverlayView = findViewById(R.id.postProcessFlashOverlay);
         if (postProcessFlashOverlayView != null) {
             postProcessFlashOverlayView.setVisibility(View.GONE);
@@ -4108,12 +4107,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     };
 
-    /**
-     * Attach a full-screen compare overlay above the game surface. The
-     * View is added to {@code streamContainer.getParent()} (a FrameLayout
-     * per activity_game.xml) so it sits in z-order above the stream and
-     * consumes touch.
-     */
     private RenderMode currentRenderMode() {
         if (postProcessRenderer == null) return RenderMode.DIRECT;
         return prefConfig.videoBlackFrameInsertion ? RenderMode.POSTPROCESS_BFI : RenderMode.POSTPROCESS;
@@ -4191,10 +4184,6 @@ public class Game extends AppCompatActivity implements SurfaceHolder.Callback,
         }
     }
 
-    /**
-     * Release both renderers (if any) and point the decoder back at the
-     * direct surface. Idempotent.
-     */
     @Override
     public void onUsbPermissionPromptStarting() {
         // Disable PiP auto-enter while the USB permission prompt is on-screen. This prevents
